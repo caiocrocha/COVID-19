@@ -1,0 +1,101 @@
+REMARK  14 active torsions:
+REMARK  status: ('A' for Active; 'I' for Inactive)
+REMARK    1  A    between atoms: C1_1  and  C2_2 
+REMARK    2  A    between atoms: C2_2  and  C3_3 
+REMARK    3  A    between atoms: C3_3  and  C4_4 
+REMARK    4  A    between atoms: C4_4  and  O1_5 
+REMARK    5  A    between atoms: O1_5  and  C5_6 
+REMARK       I    between atoms: C5_6  and  N1_8 
+REMARK    6  A    between atoms: N1_8  and  C6_9 
+REMARK    7  A    between atoms: C6_9  and  C7_10 
+REMARK    8  A    between atoms: C6_9  and  C8_14 
+REMARK    9  A    between atoms: C6_9  and  N2_18 
+REMARK   10  A    between atoms: N2_18  and  C9_19 
+REMARK   11  A    between atoms: C12_22  and  S1_25 
+REMARK   12  A    between atoms: S1_25  and  N3_28 
+REMARK   13  A    between atoms: N3_28  and  C15_29 
+REMARK   14  A    between atoms: C17_31  and  C18_34 
+ROOT
+ATOM      1  C6  <0> d           1.349   1.675  -0.193  0.00  0.00     0.308 C 
+ENDROOT
+BRANCH   1   2
+ATOM      2  N1  <0> d           2.441   0.700  -0.130  0.00  0.00    -0.295 N 
+ATOM      3  C5  <0> d           2.411  -0.287   0.787  0.00  0.00     0.362 C 
+ATOM      4  O2  <0> d           1.436  -0.426   1.499  0.00  0.00    -0.238 OA
+ATOM      5  H10 <0> d           3.285   0.774  -0.831  0.00  0.00     0.168 HD
+BRANCH   3   6
+ATOM      6  O1  <0> d           3.462  -1.119   0.915  0.00  0.00    -0.304 OA
+BRANCH   6   7
+ATOM      7  C4  <0> d           3.360  -2.159   1.923  0.00  0.00     0.030 C 
+ATOM      8  H8  <0> d           2.497  -2.804   1.699  0.00  0.00     0.075 H 
+ATOM      9  H9  <0> d           3.226  -1.699   2.913  0.00  0.00     0.075 H 
+BRANCH   7  10
+ATOM     10  C3  <0> d           4.639  -2.999   1.920  0.00  0.00    -0.045 C 
+ATOM     11  H6  <0> d           5.501  -2.355   2.144  0.00  0.00     0.036 H 
+ATOM     12  H7  <0> d           4.772  -3.460   0.930  0.00  0.00     0.036 H 
+BRANCH  10  13
+ATOM     13  C2  <0> d           4.532  -4.095   2.983  0.00  0.00    -0.067 C 
+ATOM     14  H4  <0> d           3.669  -4.740   2.759  0.00  0.00     0.032 H 
+ATOM     15  H5  <0> d           4.398  -3.634   3.973  0.00  0.00     0.032 H 
+BRANCH  13  16
+ATOM     16  C1  <0> d           5.810  -4.935   2.980  0.00  0.00    -0.076 C 
+ATOM     17  H1  <0> d           5.733  -5.723   3.744  0.00  0.00     0.027 H 
+ATOM     18  H2  <0> d           6.673  -4.290   3.204  0.00  0.00     0.027 H 
+ATOM     19  H3  <0> d           5.944  -5.396   1.990  0.00  0.00     0.027 H 
+ENDBRANCH  13  16
+ENDBRANCH  10  13
+ENDBRANCH   7  10
+ENDBRANCH   6   7
+ENDBRANCH   3   6
+ENDBRANCH   1   2
+BRANCH   1  20
+ATOM     20  C7  <0> d           1.445   2.464  -1.500  0.00  0.00     0.441 C 
+ATOM     21  F1  <0> d           0.341   3.315  -1.613  0.00  0.00    -0.166 F 
+ATOM     22  F2  <0> d           2.620   3.223  -1.501  0.00  0.00    -0.166 F 
+ATOM     23  F3  <0> d           1.462   1.577  -2.581  0.00  0.00    -0.166 F 
+ENDBRANCH   1  20
+BRANCH   1  24
+ATOM     24  C8  <0> d           1.454   2.636   0.993  0.00  0.00     0.441 C 
+ATOM     25  F4  <0> d           1.472   1.905   2.186  0.00  0.00    -0.166 F 
+ATOM     26  F5  <0> d           2.633   3.382   0.885  0.00  0.00    -0.166 F 
+ATOM     27  F6  <0> d           0.354   3.501   0.991  0.00  0.00    -0.166 F 
+ENDBRANCH   1  24
+BRANCH   1  28
+ATOM     28  N2  <0> d           0.064   0.973  -0.140  0.00  0.00    -0.349 N 
+ATOM     29  H11 <0> d          -0.722   1.317   0.548  0.00  0.00     0.162 HD
+BRANCH  28  30
+ATOM     30  C9  <0> d          -0.162  -0.133  -0.962  0.00  0.00     0.030 A 
+ATOM     31  C14 <0> d          -1.420  -0.720  -1.010  0.00  0.00    -0.056 A 
+ATOM     32  C13 <0> d          -1.640  -1.813  -1.824  0.00  0.00    -0.058 A 
+ATOM     33  H15 <0> d          -2.225  -0.322  -0.409  0.00  0.00     0.087 H 
+ATOM     34  C12 <0> d          -0.610  -2.324  -2.593  0.00  0.00     0.081 A 
+ATOM     35  H14 <0> d          -2.618  -2.270  -1.861  0.00  0.00     0.086 H 
+ATOM     36  C11 <0> d           0.644  -1.742  -2.548  0.00  0.00    -0.058 A 
+ATOM     37  C10 <0> d           0.870  -0.645  -1.739  0.00  0.00    -0.056 A 
+ATOM     38  H13 <0> d           1.446  -2.143  -3.149  0.00  0.00     0.086 H 
+ATOM     39  H12 <0> d           1.848  -0.189  -1.708  0.00  0.00     0.087 H 
+BRANCH  34  40
+ATOM     40  S1  <0> d          -0.895  -3.718  -3.631  0.00  0.00     0.285 S 
+ATOM     41  O3  <0> d           0.367  -4.339  -3.834  0.00  0.00    -0.198 OA
+ATOM     42  O4  <0> d          -2.007  -4.412  -3.082  0.00  0.00    -0.198 OA
+BRANCH  40  43
+ATOM     43  N3  <0> d          -1.380  -3.139  -5.105  0.00  0.00    -0.138 NA
+BRANCH  43  44
+ATOM     44  C15 <0> d          -0.503  -2.387  -5.880  0.00  0.00     0.191 A 
+ATOM     45  N4  <0> d           0.724  -2.053  -5.576  0.00  0.00    -0.107 NA
+ATOM     46  O5  <0> d           1.235  -1.398  -6.455  0.00  0.00    -0.216 OA
+ATOM     47  C17 <0> d           0.392  -1.197  -7.479  0.00  0.00     0.079 A 
+ATOM     48  C16 <0> d          -0.763  -1.822  -7.158  0.00  0.00    -0.004 A 
+ATOM     49  H16 <0> d          -1.672  -1.880  -7.738  0.00  0.00     0.093 H 
+BRANCH  47  50
+ATOM     50  C18 <0> d           0.677  -0.424  -8.740  0.00  0.00    -0.029 C 
+ATOM     51  H17 <0> d           1.705  -0.034  -8.707  0.00  0.00     0.036 H 
+ATOM     52  H18 <0> d          -0.031   0.414  -8.825  0.00  0.00     0.036 H 
+ATOM     53  H19 <0> d           0.564  -1.087  -9.610  0.00  0.00     0.036 H 
+ENDBRANCH  47  50
+ENDBRANCH  43  44
+ENDBRANCH  40  43
+ENDBRANCH  34  40
+ENDBRANCH  28  30
+ENDBRANCH   1  28
+TORSDOF 14
