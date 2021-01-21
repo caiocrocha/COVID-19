@@ -1,4 +1,12 @@
+# Escrever requirements
+# Colocar SelectKBest com escolha de K
+# Corrigir slider "properties"
+# Calcular descritores com rdkit
+
+# Upload de arquivo com descritores -> rotula atividade -> classifica compostos
+
 import os
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import streamlit as st
@@ -28,8 +36,12 @@ class App():
         # Load descriptors 
         #######################
         self.descriptors = self.calculate_descriptors()
-        self.merge_data = None
+        self.merged_data = None
         
+        #######################
+        # ML 
+        #######################
+        self.pipeline = None
     
     # Functions
     @staticmethod
@@ -67,12 +79,13 @@ calculated with an external program of your preference.
     @st.cache(suppress_st_warning=True, allow_output_mutation=True)
     def write_smiles(self):
         # Write smiles to disk
-        self.data[['SMILES','CID']].to_csv('smiles.smi',sep='\t',header=None,index=False)
+        self.data[['SMILES','CID']].to_csv('smiles.smi', sep='\t', header=None, index=False)
         #st.write('Wrote smiles.smi')
 
     @staticmethod
+    @st.cache(suppress_st_warning=True)
     def write_mordred_descriptors() :
-        #st.write("Cache in in run_mordred: expensive_computation")
+        st.write("Cache in in run_mordred: expensive_computation")
         # Run MORDRED with smiles file.
         '''
         Could not make mordred work with rdkit.
@@ -98,21 +111,24 @@ calculated with an external program of your preference.
 
             if not file:
                 show_file.info("Please upload a file of type: .csv")
-                return
+                st.stop()
             else:
                 descriptors = pd.read_csv(file)
                 if not 'CID' in descriptors.columns:
                     st.error('Compounds must be identified by "CID"')
-                    return
+                    st.stop()
             file.close()
         
         st.dataframe(descriptors.head())
-        # descriptors_list = descriptors.columns.tolist()[1:]
-        # selected_feature = st.sidebar.selectbox(label="Descriptors",
-        #                                     options=(descriptors_list))
+
+        descriptors_list = descriptors.columns.tolist()[1:]
+        selected = st.multiselect(label="Select descriptors", options=(descriptors_list))
+        st.write("You selected", len(selected), "features")
+
+        if not selected:
+            st.stop()
         
-        # # Plot
-        # st.markdown(f"### Selection: {selected_feature}")
+        descriptors = descriptors[['CID'] + selected]
         return descriptors
         
     def show_properties(self):
@@ -134,9 +150,6 @@ calculated with an external program of your preference.
         if activity_label is None:
             activity_label = 'f_inhibition_at_50_uM'
 
-        # Put a label on it
-        self.data['activity'] = 0
-        self.data.loc[self.data[activity_label] > 50 , 'activity'] = 1
         self.activity_label = activity_label
 
         # Create a sidebar slider to filter property
@@ -163,9 +176,14 @@ calculated with an external program of your preference.
 
         ''')
 
+        # Put a label on it
+        threshold = st.sidebar.slider(f"Threshold for selecting active compounds: \n(Activity > Threshold)", 0, 100, value=50)
+        self.data['activity'] = 0
+        self.data.loc[self.data[activity_label] > threshold, 'activity'] = 1
+
         # Create sublists
-        actives   = self.data.query(f'{activity_label} > 50')
-        inactives = self.data.query(f'{activity_label} <= 50')
+        actives   = self.data.query(f'{activity_label} > {threshold}')
+        inactives = self.data.query(f'{activity_label} <= {threshold}')
 
         st.text('')
         st.markdown(f'''
@@ -184,120 +202,203 @@ calculated with an external program of your preference.
             st.subheader('Filtered compounds')
             st.write(df_filtered)
 
-        if not st.checkbox('Hide graph', False, key=1):
+        if not st.checkbox('Hide graph'):
             fig, ax = pyplot.subplots(figsize=(15,5))
             sns.histplot(df_filtered[activity_label], kde=True, ax=ax)
             st.pyplot(fig)
         
-    @st.cache(suppress_st_warning=True)
+    @st.cache(suppress_st_warning=True, allow_output_mutation=True)
     def merge_dataset(self):
-        #st.write("Cache in merge_dataset: expensive_computation")
         # Merge the dataset to include activity data and descriptors.
         merged_data = pd.merge(self.data[['CID', self.activity_label, 'activity']].dropna(), 
                             self.descriptors, on=['CID'])
 
         # Write Merged Dataset
-        if not os.path.isfile('merged.csv') :
-            merged_data.to_csv('merged.csv',index=False)
+        if not os.path.isfile('merged.csv'):
+            merged_data.to_csv('merged.csv', index=False)
 
         return merged_data
 
     def show_merged_data(self):
         if st.checkbox('Show labeled compounds'):
             st.subheader('Merged data')
-            st.write(self.merged_data)
+            st.write(self.merged_data.head())
 
     def feature_cross_correlation(self):
-        #st.write("No cache in feature_cross_correlation")
         # Insert user-controlled values from sliders into the feature vector.
         # for feature in control_features:
         #     features[feature] = st.sidebar.slider(feature, 0, 100, 50, 5)
 
+        st.markdown('# Feature selection')
         X = self.merged_data.drop(['CID','activity'], axis=1).dropna(axis=1) # All but "CID" and "activity"
         Y = self.merged_data[self.activity_label]
 
-        # Create the sidebar slider for VarianceThreshold
-        value = st.sidebar.slider("Variance Threshold", 0.1, 1.0, 0.3)
+        if st.checkbox('Cross Correlation', True):
+            corr = X.corr()
+            st.write(corr.head(5))
 
-        from sklearn.feature_selection import VarianceThreshold
-        var = VarianceThreshold(threshold=value)
-        var = var.fit(X.iloc[:,1:], Y) # All but the activity_label
+            if st.checkbox('Show entire DataFrame'):
+                if len(corr) <= 100:
+                    st.write(corr)
+                else:
+                    st.error("Sorry, large DataFrames can't be displayed!")
 
-        st.markdown('## Cross correlation')
-        state = st.text('Computing cross correlation among descriptors...')
-        cor = X.corr()
-        st.subheader('Head(5)')
-        st.write(cor.head(5))
+            if st.checkbox('Show correlation HeatMap'):
+                fig, ax = pyplot.subplots(figsize=(10,10))
+                sns.heatmap(corr, annot=True, cmap='Reds', square=True, ax=ax)
+                st.pyplot(fig)
 
-        if st.checkbox('Show entire DataFrame', False, key=1):
-            if len(cor) <= 100:
-                st.write(cor)
-            else:
-                st.error("Sorry, large DataFrames can't be displayed!")
+            # Consertar (remover entre elas, não somente correlacionado à atividade)
+            if st.checkbox('Remove highly correlated features (|Correlation| > Correlation Threshold)', True):
+                value = st.slider("Correlation Threshold", 0.0, 1.0, value=0.95)
 
-        if st.checkbox('Show correlation HeatMap', False, key=1):
-            fig, ax = pyplot.subplots(figsize=(10,10))
-            sns.heatmap(cor, annot=True, cmap='Reds',square=True,ax=ax)
-            st.pyplot(fig)
+                # https://chrisalbon.com/machine_learning/feature_selection/drop_highly_correlated_features/
+                # Create correlation matrix
+                corr_matrix = corr.drop([self.activity_label], axis=1).abs()
+                # Select upper triangle of correlation matrix
+                upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))
 
+                # Find features with correlation greater than "value"
+                to_drop = [column for column in upper.columns if any(upper[column] > value)]
 
-        st.markdown('# Ignore everything bellow')
-        st.markdown('# Feature selection')
+                # Drop features 
+                st.write('Removed features: ')
+                st.write(to_drop)
+                self.descriptors.drop(to_drop, axis=1, inplace=True)
+                self.merged_data.drop(to_drop, axis=1, inplace=True)                
 
-        # Select the features within the threshold
-        cols = var.get_support(indices=True)
-        features = X.columns[cols]
-        st.write(f'Features within the threshold ({value})')
-        st.write(features.tolist())
+        if st.checkbox('Variance Thresholding'):
+            # Create the sidebar slider for VarianceThreshold
+            value = st.slider("Variance Threshold", 0.1, 1.0, value=0.3)
 
-        # Now filter out correlations with the Target Variable
-        # Consider correlations only with the target variable
-        # cor_target = abs(cor['f_inhibition_at_50_uM'])
+            from sklearn.feature_selection import VarianceThreshold
+            var = VarianceThreshold(threshold=value)
+            var = var.fit(X.iloc[:,1:], Y) # All but the activity_label
 
-        # Select correlations with a correlation above a threshold
-        # features = cor_target[cor_target>value]
-      
-    def mlpipeline(self):
-        st.write('# Machine learning')
+            # Select the features within the threshold
+            cols = var.get_support(indices=True)
+            features = X.columns[cols].tolist()
+            st.write(f'Features within the threshold ({value})')
+            st.write(features)
+            self.descriptors = self.descriptors[['CID'] + features]
+            self.merged_data = self.merged_data[['CID', self.activity_label, 'activity'] + features]
+
+        if st.checkbox('Show filtered data'):
+            st.write(self.merged_data.head())
+    
+    @staticmethod
+    def select_model():
+        model_list = ['RandomForestClassifier', 'XGBClassifier', 'KNeighborsClassifier']
+        model_name = st.sidebar.selectbox(label="Classifier", options=(model_list))
+
+        st.sidebar.markdown('''<sub>Note: The hyperparaters showed bellow are the optimal parameters found in our study. 
+Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=True)
+        if model_name == 'RandomForestClassifier':
+            from sklearn.ensemble import RandomForestClassifier
+
+            n_estimators = st.sidebar.slider("Number of Estimators", 0, 1000, value=1000)
+            max_depth = st.sidebar.slider("Maximum depth per Tree", 0, 10, value=8)
+            return RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, random_state=13)
+
+        elif model_name == 'XGBClassifier':
+            from xgboost import XGBClassifier
+
+            n_estimators = st.sidebar.slider("Number of Estimators", 0, 1000, value=200)
+            max_depth = st.sidebar.slider("Maximum Depth per Tree", 0, 10, value=3)
+            eta = st.sidebar.slider("Learning Rate (ETA)", 0.0, 1.0, value=0.1)
+            return XGBClassifier(objective='reg:logistic', n_estimators=n_estimators, 
+                max_depth=max_depth, eta=eta, random_state=13)
+
+        else:
+            from sklearn.neighbors import KNeighborsClassifier
+
+            n_neighbors = st.sidebar.slider("Number of Neighbors", 0, 10, value=5)
+            return KNeighborsClassifier(n_neighbors=n_neighbors)
+
+    # Train com cache não funciona
+    #@st.cache(suppress_st_warning=True)
+    def mlpipeline(self, model):
         from sklearn.model_selection import train_test_split
         from sklearn.preprocessing import StandardScaler
         from imblearn.over_sampling import SMOTE
-        from imblearn.pipeline import make_pipeline
-        from sklearn.ensemble import RandomForestClassifier
+        from imblearn.pipeline import Pipeline
 
         X = self.merged_data[self.descriptors.columns[1:]]
         y = self.merged_data['activity']
         st.write(len(X), len(y))
 
-        X_aux, X_val, y_aux, y_val = train_test_split(X, y, test_size=0.2, random_state=1)
-        X_train, X_test, y_train, y_test = train_test_split(X_aux, y_aux, test_size=0.2, random_state=2)
-        st.write(len(X_aux), len(y_aux), len(X_val), len(y_val), len(X_train), len(y_train), len(X_test), len(y_test))
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=27)
+        st.write(len(X_train), len(y_train), len(X_test), len(y_test))
 
-        model = RandomForestClassifier(n_estimators=40, max_depth=6, random_state=13)
-        pipe = make_pipeline(SMOTE(random_state=42), StandardScaler(), model)
-        model_fitted = pipe.fit(X_train, y_train)
+        self.pipeline = Pipeline(steps=[('smote', SMOTE(random_state=42)), 
+                                        ('scaler', StandardScaler()), 
+                                        ('clf', model)
+                                        ])
+        self.pipeline.fit(X_train, y_train)
+
+        model_name = str(self.pipeline['clf']).split('(')[0]
+
+        import pickle
+        # Serialize model
+        if not os.path.isdir('pickle'):
+            os.mkdir('pickle')
+        with open(f'pickle/{model_name}.pickle', 'wb') as file:
+            pickle.dump(self.pipeline, file)
 
         from sklearn.metrics import roc_curve, auc
         fig, ax = pyplot.subplots()
 
-        y_pred_train = model_fitted.predict(X_train)
-        fpr, tpr, _ = roc_curve(y_train, y_pred_train)
-        ax.plot(fpr, tpr, label=f'Train set: {auc(fpr, tpr):>.3f}')
-
-        y_pred = model_fitted.predict(X_test)
-        fpr, tpr, _ = roc_curve(y_test, y_pred)
+        y_proba = self.pipeline.predict_proba(X_test)
+        fpr, tpr, _ = roc_curve(y_test, y_proba[:,1])
         ax.plot(fpr, tpr, label=f'Test set: {auc(fpr, tpr):>.3f}')
 
-        y_pred_val = model_fitted.predict(X_val)
-        fpr, tpr, _ = roc_curve(y_val, y_pred_val)
-        ax.plot(fpr, tpr, label=f'Validation set: {auc(fpr, tpr):>.3f}')
+        y_proba_train = self.pipeline.predict_proba(X_train)
+        fpr, tpr, _ = roc_curve(y_train, y_proba_train[:,1])
+        ax.plot(fpr, tpr, label=f'Train set: {auc(fpr, tpr):>.3f}')
 
         pyplot.legend()
+        pyplot.savefig('roc_curve.png')
+        st.pyplot(fig)
+
+    @staticmethod
+    def show_roc_curve():
+        st.image('roc_curve.png')
+    
+    @staticmethod
+    def upload_new_compounds():
+        st.markdown('## Classify new compounds')
+        file = st.file_uploader('Upload file')
+        show_file = st.empty()
+
+        if not file:
+            show_file.info("Please upload a file of type: .csv")
+            return
+        else:
+            new_data = pd.read_csv(file)
+            st.write(new_data.head())
+        file.close()
+        return new_data
+
+    def pipeline_predict(self, new_data):
+        descriptors_list = self.descriptors.columns[1:].tolist()
+        X_val = new_data[descriptors_list]
+        y_val = new_data['f_activity']
+        st.write('Model input features: ')
+        st.write(descriptors_list)
+
+        y_proba = self.pipeline.predict_proba(X_val)
+
+        from sklearn.metrics import roc_curve, auc
+        fig, ax = pyplot.subplots()
+        fpr, tpr, _ = roc_curve(y_val, y_proba[:,1])
+        ax.plot(fpr, tpr, label=f'Validation set: {auc(fpr, tpr):>.3f}')
+        ax.legend()
         st.pyplot(fig)
 
     @staticmethod
     def copyright_note():
-        st.markdown('Copyright (c) 2021 DIEGO E. B. GOMES, CAIO C. ROCHA')
+        st.markdown('----------------------------------------------------')
+        st.markdown('Copyright (c) 2021 CAIO C. ROCHA, DIEGO E. B. GOMES')
         st.markdown('Definir/atualizar copyright quando estiver pronto')
 
 
@@ -413,8 +514,20 @@ def main() :
         app.merged_data = app.merge_dataset()
         app.show_merged_data()
         app.feature_cross_correlation()
+
         # Launch the ML pipeline
-        app.mlpipeline()
+        st.write('# Machine learning')
+        model = app.select_model()
+        if st.checkbox('Train the ML model'):
+            app.mlpipeline(model)
+        else:
+            app.show_roc_curve()
+        
+        new_data = app.upload_new_compounds()
+        app.pipeline_predict(new_data)
+        #if st.checkbox('Predict new compounds'):
+        #    app.pipeline_predict()
+        
     #mlpipeline2()
 
     # Copyright footnote
