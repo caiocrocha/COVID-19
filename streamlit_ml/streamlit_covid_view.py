@@ -42,6 +42,12 @@ class App():
         # ML 
         #######################
         self.pipeline = None
+        self.X_train  = None
+        self.X_test   = None
+        self.y_train  = None
+        self.y_test   = None
+        self.test_proba  = None
+        self.train_proba = None
     
     # Functions
     @staticmethod
@@ -298,7 +304,7 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
 
             n_estimators = st.sidebar.slider("Number of Estimators", 0, 1000, value=1000)
             max_depth = st.sidebar.slider("Maximum depth per Tree", 0, 10, value=8)
-            return RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, random_state=13)
+            return (model_name, RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, random_state=13))
 
         elif model_name == 'XGBClassifier':
             from xgboost import XGBClassifier
@@ -306,37 +312,33 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
             n_estimators = st.sidebar.slider("Number of Estimators", 0, 1000, value=200)
             max_depth = st.sidebar.slider("Maximum Depth per Tree", 0, 10, value=3)
             eta = st.sidebar.slider("Learning Rate (ETA)", 0.0, 1.0, value=0.1)
-            return XGBClassifier(objective='reg:logistic', n_estimators=n_estimators, 
-                max_depth=max_depth, eta=eta, random_state=13)
+            return (model_name, XGBClassifier(objective='reg:logistic', n_estimators=n_estimators, 
+                max_depth=max_depth, eta=eta, random_state=13))
 
         else:
             from sklearn.neighbors import KNeighborsClassifier
 
             n_neighbors = st.sidebar.slider("Number of Neighbors", 0, 10, value=5)
-            return KNeighborsClassifier(n_neighbors=n_neighbors)
+            return (model_name, KNeighborsClassifier(n_neighbors=n_neighbors))
 
-    # Train com cache não funciona
-    #@st.cache(suppress_st_warning=True)
-    def mlpipeline(self, model):
+    def split_X_and_y(self):
         from sklearn.model_selection import train_test_split
+        X = self.merged_data[self.descriptors.columns[1:]]
+        y = self.merged_data['activity']
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+                                                                    X, y, test_size=0.2, random_state=27)
+
+    @st.cache(suppress_st_warning=True)
+    def mlpipeline(self, model_name, model):
         from sklearn.preprocessing import StandardScaler
         from imblearn.over_sampling import SMOTE
         from imblearn.pipeline import Pipeline
-
-        X = self.merged_data[self.descriptors.columns[1:]]
-        y = self.merged_data['activity']
-        st.write(len(X), len(y))
-
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=27)
-        st.write(len(X_train), len(y_train), len(X_test), len(y_test))
-
+        
         self.pipeline = Pipeline(steps=[('smote', SMOTE(random_state=42)), 
                                         ('scaler', StandardScaler()), 
                                         ('clf', model)
                                         ])
-        self.pipeline.fit(X_train, y_train)
-
-        model_name = str(self.pipeline['clf']).split('(')[0]
+        self.pipeline.fit(self.X_train, self.y_train)
 
         import pickle
         # Serialize model
@@ -345,24 +347,41 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
         with open(f'pickle/{model_name}.pickle', 'wb') as file:
             pickle.dump(self.pipeline, file)
 
+        features = list(self.descriptors.columns[1:])
+        # Save input features names
+        with open('features.lst', 'w+') as features_file:
+            features_file.write("\n".join(features))
+    
+    def train_test_proba(self, model_name):
+        import pickle
+        try:
+            file = open(f'pickle/{model_name}.pickle', 'rb')
+            self.pipeline = pickle.load(file)
+            file.close()
+        except OSError as e:
+            st.error("Oops! It seems the model hasn't been trained yet")
+            st.error(str(e))
+            st.stop()
+
+        with open('features.lst', 'r') as file:
+            features = file.read().splitlines()
+        if features != list(self.descriptors.columns[1:]):
+            st.error(f'Expected features do not match the given features. Please build the Pipeline again.')
+            st.stop()
+        
         from sklearn.metrics import roc_curve, auc
         fig, ax = pyplot.subplots()
 
-        y_proba = self.pipeline.predict_proba(X_test)
-        fpr, tpr, _ = roc_curve(y_test, y_proba[:,1])
+        self.test_proba = self.pipeline.predict_proba(self.X_test)[:,1]
+        fpr, tpr, _ = roc_curve(self.y_test, self.test_proba)
         ax.plot(fpr, tpr, label=f'Test set: {auc(fpr, tpr):>.3f}')
 
-        y_proba_train = self.pipeline.predict_proba(X_train)
-        fpr, tpr, _ = roc_curve(y_train, y_proba_train[:,1])
+        self.train_proba = self.pipeline.predict_proba(self.X_train)[:,1]
+        fpr, tpr, _ = roc_curve(self.y_train, self.train_proba)
         ax.plot(fpr, tpr, label=f'Train set: {auc(fpr, tpr):>.3f}')
 
         pyplot.legend()
-        pyplot.savefig('roc_curve.png')
         st.pyplot(fig)
-
-    @staticmethod
-    def show_roc_curve():
-        st.image('roc_curve.png')
     
     @staticmethod
     def upload_new_compounds():
@@ -372,7 +391,7 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
 
         if not file:
             show_file.info("Please upload a file of type: .csv")
-            return
+            st.stop()
         else:
             new_data = pd.read_csv(file)
             st.write(new_data.head())
@@ -380,19 +399,26 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
         return new_data
 
     def pipeline_predict(self, new_data):
+        from sklearn.metrics import roc_curve, auc
+
         descriptors_list = self.descriptors.columns[1:].tolist()
         X_val = new_data[descriptors_list]
-        y_val = new_data['f_activity']
+        y_val = new_data['activity'] 
         st.write('Model input features: ')
         st.write(descriptors_list)
 
-        y_proba = self.pipeline.predict_proba(X_val)
-
-        from sklearn.metrics import roc_curve, auc
         fig, ax = pyplot.subplots()
-        fpr, tpr, _ = roc_curve(y_val, y_proba[:,1])
-        ax.plot(fpr, tpr, label=f'Validation set: {auc(fpr, tpr):>.3f}')
-        ax.legend()
+        fpr, tpr, _ = roc_curve(self.y_test, self.test_proba)
+        ax.plot(fpr, tpr, label=f'Test set: {auc(fpr, tpr):>.3f}')
+
+        fpr, tpr, _ = roc_curve(self.y_train, self.train_proba)
+        ax.plot(fpr, tpr, label=f'Train set: {auc(fpr, tpr):>.3f}')
+
+        y_proba = self.pipeline.predict_proba(X_val)[:,1]
+        fpr, tpr, _ = roc_curve(y_val, y_proba)
+        ax.plot(fpr, tpr, label=f'Classified compounds: {auc(fpr, tpr):>.3f}')
+
+        pyplot.legend()
         st.pyplot(fig)
 
     @staticmethod
@@ -515,18 +541,15 @@ def main() :
         app.show_merged_data()
         app.feature_cross_correlation()
 
-        # Launch the ML pipeline
         st.write('# Machine learning')
-        model = app.select_model()
-        if st.checkbox('Train the ML model'):
-            app.mlpipeline(model)
-        else:
-            app.show_roc_curve()
+        app.split_X_and_y()
+        model_name, model = app.select_model()
+        if st.checkbox('Build Pipeline'):
+            app.mlpipeline(model_name, model)
         
+        app.train_test_proba(model_name)
         new_data = app.upload_new_compounds()
         app.pipeline_predict(new_data)
-        #if st.checkbox('Predict new compounds'):
-        #    app.pipeline_predict()
         
     #mlpipeline2()
 
