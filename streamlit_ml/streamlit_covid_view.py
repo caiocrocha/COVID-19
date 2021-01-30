@@ -1,9 +1,13 @@
-# Escrever requirements
-# Colocar SelectKBest com escolha de K
-# Corrigir slider "properties"
-# Calcular descritores com rdkit
+# Usar postera inteiro como conjunto de treinamento (opcao, elimina teste)
+# Upload dados de treinamento, teste (generalizacao)
 
-# Upload de arquivo com descritores -> rotula atividade -> classifica compostos
+# Colocar opcao de usar descritores otimos (se selecionado rdkit) de acordo com o classificador
+# Otimizar: calculo dos descritores para os novos dados (new_data)
+
+# Opcoes: baixar resultados e baixar modelo pickle
+# Colocar SelectKBest com escolha de K
+
+# Escrever requirements, adicionar mordred e rdkit
 
 import os
 import numpy as np
@@ -11,6 +15,9 @@ import pandas as pd
 import seaborn as sns
 import streamlit as st
 from matplotlib import pyplot
+
+from rdkit import Chem
+from rdkit.ML.Descriptors.MoleculeDescriptors import MolecularDescriptorCalculator
 
 # Program
 class App():
@@ -23,24 +30,27 @@ class App():
         # Load Activity data 
         ########################
         st.markdown('## **Activity data**')
+        st.markdown('### Visualizing properties')
         self.data = self.download_activity(DATA_URL)
-        self.write_smiles()
+        self.write_smiles(self.data, 'smiles.smi')
 
         #######################
         # Summary of the data 
         #######################
         self.activity_label = None
-        self.show_properties()
+        self.show_properties() # show properties and set activity label
 
         #######################
         # Load descriptors 
         #######################
+        self.calc = None
         self.descriptors = self.calculate_descriptors()
         self.merged_data = None
         
         #######################
         # ML 
         #######################
+        self.new_data = None
         self.pipeline = None
         self.X_train  = None
         self.X_test   = None
@@ -73,44 +83,63 @@ calculated with an external program of your preference.
         # Verbose
         st.text('Fetching data from PostEra... ')
         data_load_state = st.markdown('Loading activity data...')
-        if os.path.isfile('activity.csv') :
-            data = pd.read_csv('activity.csv')
+        if os.path.isfile('csv/activity.csv') :
+            data = pd.read_csv('csv/activity.csv')
         else :
             data = pd.read_csv(DATA_URL)
-            data.to_csv('activity.csv', index=False)
+            data.to_csv('csv/activity.csv', index=False)
         data_load_state.text('Done! (using cache)')
-        st.text('Data saved to "activity.csv"')
+        st.text('Data saved to "csv/activity.csv"')
         return data
     
+    @staticmethod
     @st.cache(suppress_st_warning=True, allow_output_mutation=True)
-    def write_smiles(self):
+    def write_smiles(data, smiles):
         # Write smiles to disk
-        self.data[['SMILES','CID']].to_csv('smiles.smi', sep='\t', header=None, index=False)
-        #st.write('Wrote smiles.smi')
+        data[['SMILES','CID']].to_csv(smiles, sep='\t', header=None, index=False)
 
     @staticmethod
     @st.cache(suppress_st_warning=True)
-    def write_mordred_descriptors() :
-        st.write("Cache in in run_mordred: expensive_computation")
+    def write_mordred_descriptors(smiles, csv) :
         # Run MORDRED with smiles file.
-        '''
-        Could not make mordred work with rdkit.
-            There is a lot of (unsolved) confusion with library compatibility
-        '''
+        # Could not make mordred work with rdkit.
+        # There is a lot of (unsolved) confusion with library compatibility
         # Let's rely on the manual way
-        if os.path.isfile('smiles.smi') and not os.path.isfile('descriptors.csv.gz'):
-            os.system('python -m mordred smiles.smi > descriptors.csv')
+        if os.path.isfile(smiles) and not os.path.isfile(f'{csv}.gz'):
+            os.system(f'python -m mordred {smiles} > {csv}')
 
-        if os.path.isfile('descriptors.csv'):
-            os.system('gzip descriptors.csv')
+        if os.path.isfile(csv):
+            os.system(f'gzip {csv}')
+    
+    @st.cache(suppress_st_warning=True)
+    def write_rdkit_descriptors(self, smiles, csv):
+        if os.path.isfile(smiles) and not os.path.isfile(f'{csv}.gz'):
+            # Get molecules from SMILES
+            mols = [Chem.MolFromSmiles(i) for i in self.data['SMILES']]
+
+            # Get list of descriptors
+            descriptors_list = [a[0] for a in Chem.Descriptors.descList]
+
+            calculator = MolecularDescriptorCalculator(descriptors_list)
+            lista = [calculator.CalcDescriptors(m) for m in mols]
+            
+            descriptors = pd.DataFrame(lista, columns=descriptors_list)
+            descriptors.insert(0, column='CID', value=self.data['CID'])
+            descriptors.to_csv(f'{csv}.gz', index=False, compression='gzip')
 
     def calculate_descriptors(self):
         st.markdown("## **Descriptors**")
         if st.checkbox('Calculate Mordred descriptors'):
-            self.write_mordred_descriptors()
+            self.write_mordred_descriptors('smiles.smi', 'csv/mordred.csv')
             # Read MORDRED descriptors
-            descriptors = pd.read_csv('descriptors.csv.gz', compression='gzip')
+            descriptors = pd.read_csv('csv/mordred.csv.gz', compression='gzip')
             descriptors.rename(columns={'name':'CID'}, inplace=True)
+            self.calc = 'mordred' # control variable
+        elif st.checkbox('Calculate RDKit descriptors'):
+            self.write_rdkit_descriptors('smiles.smi', 'csv/rdkit.csv')
+            # Read RDKit descriptors
+            descriptors = pd.read_csv('csv/rdkit.csv.gz', compression='gzip')
+            self.calc = 'rdkit' # control variable
         else:
             file = st.file_uploader('or Upload descriptors file')
             show_file = st.empty()
@@ -124,11 +153,15 @@ calculated with an external program of your preference.
                     st.error('Compounds must be identified by "CID"')
                     st.stop()
             file.close()
+            self.calc = 'other' # control variable
         
         st.dataframe(descriptors.head())
 
         descriptors_list = descriptors.columns.tolist()[1:]
-        selected = st.multiselect(label="Select descriptors", options=(descriptors_list))
+        selected = st.multiselect(label="Select descriptors", options=(
+            [f'Select all ({len(descriptors_list)})'] + descriptors_list))
+        if 'Select all' in selected:
+            selected = descriptors_list
         st.write("You selected", len(selected), "features")
 
         if not selected:
@@ -150,8 +183,12 @@ calculated with an external program of your preference.
         ########################
 
         # Create a sidebar dropdown to select property to show.
-        activity_label = st.sidebar.selectbox(label="Properties",
+        activity_label = st.sidebar.selectbox(label="Properties *",
                                         options=([None, *data_numeric]))
+        st.sidebar.markdown('''<sub>* The classifier will be trained accordingly to the selected property. 
+If no property is selected, then "f_inhibition_at_50_uM" will be used for labeling the compounds.    
+A compound will be considered to be active if `Property > 50`. This value can be adjusted with the slider below.</sub>''', 
+unsafe_allow_html=True)
         
         if activity_label is None:
             activity_label = 'f_inhibition_at_50_uM'
@@ -165,7 +202,7 @@ calculated with an external program of your preference.
         #mean_val = float(self.data[activity_label].mean())
 
         ## Step 2 - Create the sidebar slider
-        min_filter, max_filter = st.sidebar.slider("Filter by: " + activity_label, 
+        min_filter, max_filter = st.slider("Filter by: " + activity_label, 
                                 min_val,
                                 max_val,
                                 (min_val, max_val))
@@ -183,7 +220,7 @@ calculated with an external program of your preference.
         ''')
 
         # Put a label on it
-        threshold = st.sidebar.slider(f"Threshold for selecting active compounds: \n(Activity > Threshold)", 0, 100, value=50)
+        threshold = st.sidebar.slider("Threshold for selecting active compounds:", 0, 100, value=50)
         self.data['activity'] = 0
         self.data.loc[self.data[activity_label] > threshold, 'activity'] = 1
 
@@ -196,7 +233,6 @@ calculated with an external program of your preference.
         |Compounds|Active|Inactive|
         |---|---|---|
         |{len(self.data)}|{len(actives)}|{len(inactives)}|
-
         ''')
 
         st.text('')
@@ -213,15 +249,13 @@ calculated with an external program of your preference.
             sns.histplot(df_filtered[activity_label], kde=True, ax=ax)
             st.pyplot(fig)
         
-    @st.cache(suppress_st_warning=True, allow_output_mutation=True)
     def merge_dataset(self):
         # Merge the dataset to include activity data and descriptors.
         merged_data = pd.merge(self.data[['CID', self.activity_label, 'activity']].dropna(), 
                             self.descriptors, on=['CID'])
-
         # Write Merged Dataset
-        if not os.path.isfile('merged.csv'):
-            merged_data.to_csv('merged.csv', index=False)
+        if not os.path.isfile('csv/merged.csv'):
+            merged_data.to_csv('csv/merged.csv', index=False)
 
         return merged_data
 
@@ -234,12 +268,14 @@ calculated with an external program of your preference.
         # Insert user-controlled values from sliders into the feature vector.
         # for feature in control_features:
         #     features[feature] = st.sidebar.slider(feature, 0, 100, 50, 5)
-
         st.markdown('# Feature selection')
-        X = self.merged_data.drop(['CID','activity'], axis=1).dropna(axis=1) # All but "CID" and "activity"
-        Y = self.merged_data[self.activity_label]
+        st.markdown('''Filter the selected descriptors. \*    
+<sub> \* The steps bellow are applied sequentially.</sub>''', unsafe_allow_html=True)
 
-        if st.checkbox('Cross Correlation', True):
+        st.markdown('## Cross Correlation')
+        if st.checkbox('Compute cross correlation between features', True):
+            X = self.merged_data.drop(['CID','activity'], axis=1).dropna(axis=1)
+            Y = self.merged_data[self.activity_label]
             corr = X.corr()
             st.write(corr.head(5))
 
@@ -273,25 +309,32 @@ calculated with an external program of your preference.
                 self.descriptors.drop(to_drop, axis=1, inplace=True)
                 self.merged_data.drop(to_drop, axis=1, inplace=True)                
 
-        if st.checkbox('Variance Thresholding'):
-            # Create the sidebar slider for VarianceThreshold
-            value = st.slider("Variance Threshold", 0.1, 1.0, value=0.3)
-
+        st.markdown('## Variance Thresholding')
+        # Create the sidebar slider for VarianceThreshold
+        value = st.slider("Variance Threshold", 0.0, 1.0, value=0.3)
+        if st.checkbox('Filter out features with variance bellow the threshold'):
             from sklearn.feature_selection import VarianceThreshold
-            var = VarianceThreshold(threshold=value)
-            var = var.fit(X.iloc[:,1:], Y) # All but the activity_label
 
-            # Select the features within the threshold
+            X = self.merged_data.drop(['CID','activity', self.activity_label], axis=1).dropna(axis=1)
+            Y = self.merged_data[self.activity_label]
+            var = VarianceThreshold(threshold=value)
+            var = var.fit(X, Y)
+
+            # Get features within the threshold
             cols = var.get_support(indices=True)
             features = X.columns[cols].tolist()
-            st.write(f'Features within the threshold ({value})')
-            st.write(features)
-            self.descriptors = self.descriptors[['CID'] + features]
-            self.merged_data = self.merged_data[['CID', self.activity_label, 'activity'] + features]
+
+            # Remove features NOT within the threshold
+            to_drop = X.columns[~X.columns.isin(features)].tolist()
+            st.write('Removed features: ')
+            st.write(to_drop)
+            
+            self.descriptors.drop(to_drop, axis=1, inplace=True)
+            self.merged_data.drop(to_drop, axis=1, inplace=True) 
 
         if st.checkbox('Show filtered data'):
             st.write(self.merged_data.head())
-    
+            
     @staticmethod
     def select_model():
         model_list = ['RandomForestClassifier', 'XGBClassifier', 'KNeighborsClassifier']
@@ -326,7 +369,7 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
         X = self.merged_data[self.descriptors.columns[1:]]
         y = self.merged_data['activity']
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-                                                                    X, y, test_size=0.2, random_state=27)
+                                            X, y, test_size=0.2, random_state=27)
 
     @st.cache(suppress_st_warning=True)
     def mlpipeline(self, model_name, model):
@@ -380,46 +423,80 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
         fpr, tpr, _ = roc_curve(self.y_train, self.train_proba)
         ax.plot(fpr, tpr, label=f'Train set: {auc(fpr, tpr):>.3f}')
 
+        pyplot.xlabel('False Positive Rate')
+        pyplot.ylabel('True Positive Rate')
+        pyplot.title('Receiver Operating Characteristic')
         pyplot.legend()
         st.pyplot(fig)
     
-    @staticmethod
-    def upload_new_compounds():
+    def upload_new_compounds(self):
         st.markdown('## Classify new compounds')
-        file = st.file_uploader('Upload file')
+        file = st.file_uploader('Upload file *')
         show_file = st.empty()
+        st.markdown('''<sub> \* File must contain the following columns:   
+1 - "SMILES": SMILES structures of the compounds     
+2 - "CID": compounds ID</sub>''', unsafe_allow_html=True)
 
         if not file:
             show_file.info("Please upload a file of type: .csv")
             st.stop()
         else:
-            new_data = pd.read_csv(file)
-            st.write(new_data.head())
+            self.new_data = pd.read_csv(file)
+            st.write(self.new_data.head())
         file.close()
-        return new_data
+        
+        self.write_smiles(self.new_data, 'smiles2.smi')
+        if self.calc == 'mordred':
+            self.write_mordred_descriptors('smiles2.smi', 'csv/mordred2.csv')
+            # Read MORDRED descriptors
+            descriptors = pd.read_csv('csv/mordred2.csv.gz', compression='gzip')
+            descriptors.rename(columns={'name':'CID'}, inplace=True)
+            self.new_data = pd.merge(self.new_data, descriptors[self.descriptors.columns], on=['CID'])
+        elif self.calc == 'rdkit':
+            self.write_rdkit_descriptors('smiles2.smi', 'csv/rdkit2.csv')
+            # Read RDKit descriptors
+            descriptors = pd.read_csv('csv/rdkit2.csv.gz', compression='gzip')
+            self.new_data = pd.merge(self.new_data, descriptors[self.descriptors.columns], on=['CID'])
+        else:
+            file = st.file_uploader('Upload the descriptors file for the new compounds')
+            show_file = st.empty()
 
-    def pipeline_predict(self, new_data):
-        from sklearn.metrics import roc_curve, auc
-
+            if not file:
+                show_file.info("Please upload a file of type: .csv")
+                st.stop()
+            else:
+                descriptors = pd.read_csv(file)
+                if not 'CID' in descriptors.columns:
+                    st.error('Compounds must be identified by "CID"')
+                    st.stop()
+            file.close()
+            try:
+                self.new_data = pd.merge(self.new_data, descriptors[self.descriptors.columns], on=['CID'])
+            except KeyError as e:
+                st.error('''Expected features do not match the given features. 
+Please make sure that the input file contains the same descriptors used for training the model.''')
+                st.stop()
+            
+    def pipeline_predict(self):
+        st.markdown('### **Predictions**')
         descriptors_list = self.descriptors.columns[1:].tolist()
-        X_val = new_data[descriptors_list]
-        y_val = new_data['activity'] 
+        X_val = self.new_data[descriptors_list]
         st.write('Model input features: ')
         st.write(descriptors_list)
 
-        fig, ax = pyplot.subplots()
-        fpr, tpr, _ = roc_curve(self.y_test, self.test_proba)
-        ax.plot(fpr, tpr, label=f'Test set: {auc(fpr, tpr):>.3f}')
-
-        fpr, tpr, _ = roc_curve(self.y_train, self.train_proba)
-        ax.plot(fpr, tpr, label=f'Train set: {auc(fpr, tpr):>.3f}')
-
+        y_pred  = self.pipeline.predict(X_val)
         y_proba = self.pipeline.predict_proba(X_val)[:,1]
-        fpr, tpr, _ = roc_curve(y_val, y_proba)
-        ax.plot(fpr, tpr, label=f'Classified compounds: {auc(fpr, tpr):>.3f}')
 
-        pyplot.legend()
-        st.pyplot(fig)
+        predictions = self.new_data[['CID']].copy()
+        predictions['prediction'] = y_pred
+        predictions['probability'] = y_proba
+        predictions.sort_values('probability', ascending=False, inplace=True)
+
+        st.write('Top compounds:')
+        st.write(predictions.head())
+
+        predictions.to_csv('csv/predictions.csv', index=False)
+        st.write('Compounds saved to "csv/predictions.csv".')
 
     @staticmethod
     def copyright_note():
@@ -429,108 +506,10 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
 
 
 
-@st.cache(suppress_st_warning=True)
-def mlpipeline2() :
-    ###########################
-    # Machine Learning features
-    ###########################
-    # H2O 
-    # Load the H2O library and start up the H2O cluster locally on your machine
-    import h2o
-
-    # Number of threads, nthreads = -1, means use all cores on your machine
-    # max_mem_size is the maximum memory (in GB) to allocate to H2O
-    nproc = os.cpu_count()
-    h2o.init(nthreads = nproc-1, max_mem_size = 8)
-
-    h2o_data = h2o.import_file('merged.csv',header=1)
-
-    # Partition data into 70%, 15%, 15% chunks
-    # Setting a seed will guarantee reproducibility
-    splits = h2o_data.split_frame(ratios=[0.7, 0.15], seed=1)
-    train = splits[0]
-    valid = splits[1]
-    test = splits[2]
-
-    st.markdown(f'''
-    | Set | Instances |
-    | --- | --- |
-    | Train | {train.nrow} |
-    | Validation | {valid.nrow}|
-    | Test | {test.nrow}|
-    ''')
-
-    y = 'activity'
-    x = list(h2o_data.columns)
-    x.remove(y)  #remove the response variable
-    x.remove('CID')  #remove the interest rate column because it's correlated with the outcome
-
-
-    # Import H2O GBM:
-    from h2o.estimators.gbm import H2OGradientBoostingEstimator
-
-    # Initialize and train the GBM estimator:
-    st.write('[GBM 1] Initializing the GBM estimator')
-    gbm_fit1 = H2OGradientBoostingEstimator(model_id='gbm_fit1', seed=1)
-
-    st.write('[GBM 1] Training the GBM estimator... please wait')
-    gbm_fit1.train(x=x, y=y, training_frame=train)
-
-
-    # Train a GBM with more trees
-    #  st.write('[GBM 2] Initializing the GBM estimator with 500 trees' )
-    #  gbm_fit2 = H2OGradientBoostingEstimator(model_id='gbm_fit2', ntrees=500, seed=1)
-
-    #  st.write('[GBM 2] Training the GBM estimator... please wait (GBM2)')
-    #  gbm_fit2.train(x=x, y=y, training_frame=train)
-
-    #  st.write('[GBM 3] Initializing the GBM estimator with 500 trees and early stop')
-    ## Now let's use early stopping to find optimal ntrees
-    #  gbm_fit3 = H2OGradientBoostingEstimator(model_id='gbm_fit3', 
-    #                                        ntrees=500, 
-    #                                        score_tree_interval=5,     #used for early stopping
-    #                                        stopping_rounds=3,         #used for early stopping
-    #                                        stopping_metric='AUC',     #used for early stopping
-    #                                        stopping_tolerance=0.0005, #used for early stopping
-    #                                        seed=1)
-
-    #  st.write('[GBM 3] Training the GBM estimator... please wait (GBM3)')
-    # The use of a validation_frame is recommended with using early stopping
-    #  gbm_fit3.train(x=x, y=y, training_frame=train, validation_frame=valid)
-
-    # Evaluate the model performance
-    gbm_perf1 = gbm_fit1.model_performance(test)
-    #gbm_perf2 = gbm_fit2.model_performance(test)
-    #gbm_perf3 = gbm_fit3.model_performance(test)
-
-
-    # Retreive test set AUC
-    st.markdown(f'''
-    | Model | AUC | 
-    | ----- | --- |
-    | GBM1  | {gbm_perf1.auc()} |
-    ''')
-    #| GBM2  | {gbm_perf2.auc()} |
-    #''')
-    #| GBM3  | {gbm_perf3.auc()} | 
-    #''')
 
 def main() :
     # """Run this function to display the Streamlit app"""
     # st.info(__doc__)
-
-    # file = st.file_uploader("Upload file")
-
-    # show_file = st.empty()
-
-    # if not file:
-    #     show_file.info("Please upload a file of type: .csv")
-    #     return
-    # else:
-    #     data = pd.read_csv(file)
-    #     st.dataframe(data.head())
-
-    # file.close()
 
     # Config
     DATA_URL = ('https://covid.postera.ai/covid/activity_data.csv')
@@ -548,8 +527,8 @@ def main() :
             app.mlpipeline(model_name, model)
         
         app.train_test_proba(model_name)
-        new_data = app.upload_new_compounds()
-        app.pipeline_predict(new_data)
+        app.upload_new_compounds()
+        app.pipeline_predict()
         
     #mlpipeline2()
 
