@@ -9,6 +9,11 @@
 
 # Escrever requirements, adicionar mordred e rdkit
 
+#show labeled compounds ser mais claro
+#modelo foi lido do pickle
+#incluir depois da curva roc metricas de avalacao
+#explicar treinamento e teste
+
 import os
 import numpy as np
 import pandas as pd
@@ -486,6 +491,12 @@ Please make sure that the input file contains the same descriptors used for trai
 
         y_pred  = self.pipeline.predict(X_val)
         y_proba = self.pipeline.predict_proba(X_val)[:,1]
+
+
+
+
+        # Active ou inactive no lugar de 0 ou 1
+        # Mostrar numero de ativos ou inativos
 
         predictions = self.new_data[['CID']].copy()
         predictions['prediction'] = y_pred
