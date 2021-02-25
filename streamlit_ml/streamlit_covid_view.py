@@ -1,8 +1,8 @@
-# Corrigir numero de compostos/ ativos + inativos
-# Corrigir indice do dataframe filtered (reset_index)
+# Corrigir numero de compostos/ ativos + inativos ok
+# Corrigir indice do dataframe filtered (reset_index) ok
 # Select all deu erro
 # Mostrar distribuicao dos dados para descritores (n < 10)
-# Curva ROC: mudar train para training
+# Curva ROC: mudar train para training ok
 # Build pipeline: escolher classificador antes
 # Mostrar tabela de metricas (para os modelos progressivamente)
 
@@ -38,6 +38,8 @@ class App():
         # Show logo, title and description
         self.show_logo()
         self.show_description()
+        # Create .metadata directory
+        self.create_metadata_dir()
 
         ########################
         # Load Activity data 
@@ -45,7 +47,7 @@ class App():
         st.markdown('## **Activity data**')
         st.markdown('### Visualizing properties')
         self.data = self.download_activity(DATA_URL)
-        self.write_smiles(self.data, 'smiles.smi')
+        self.write_smiles(self.data, '.metadata/smiles.smi')
 
         #######################
         # Summary of the data 
@@ -91,18 +93,23 @@ calculated with an external program of your preference.
 <sub>We'd like to send our deepest thanks to **PostEra**, without which this work wouldn't have been possible. </sub>
 ''', unsafe_allow_html=True)
 
+    @staticmethod
+    def create_metadata_dir():
+        if not os.path.isdir('.metadata'):
+            os.mkdir('.metadata')
+    
     @st.cache(suppress_st_warning=True, allow_output_mutation=True)
-    def download_activity(self, DATA_URL) :
+    def download_activity(self, DATA_URL):
         # Verbose
         st.text('Fetching data from PostEra... ')
         data_load_state = st.markdown('Loading activity data...')
-        if os.path.isfile('csv/activity.csv') :
-            data = pd.read_csv('csv/activity.csv')
-        else :
+        if os.path.isfile('activity.csv'):
+            data = pd.read_csv('activity.csv')
+        else:
             data = pd.read_csv(DATA_URL)
-            data.to_csv('csv/activity.csv', index=False)
+            data.to_csv('activity.csv', index=False)
         data_load_state.text('Done! (using cache)')
-        st.text('Data saved to "csv/activity.csv"')
+        st.text('Data saved to "activity.csv"')
         return data
     
     @staticmethod
@@ -143,15 +150,15 @@ calculated with an external program of your preference.
     def calculate_descriptors(self):
         st.markdown("## **Descriptors**")
         if st.checkbox('Calculate Mordred descriptors'):
-            self.write_mordred_descriptors('smiles.smi', 'csv/mordred.csv')
+            self.write_mordred_descriptors('.metadata/smiles.smi', '.metadata/csv/mordred.csv')
             # Read MORDRED descriptors
-            descriptors = pd.read_csv('csv/mordred.csv.gz', compression='gzip')
+            descriptors = pd.read_csv('.metadata/csv/mordred.csv.gz', compression='gzip')
             descriptors.rename(columns={'name':'CID'}, inplace=True)
             self.calc = 'mordred' # control variable
         elif st.checkbox('Calculate RDKit descriptors'):
-            self.write_rdkit_descriptors('smiles.smi', 'csv/rdkit.csv')
+            self.write_rdkit_descriptors('.metadata/smiles.smi', '.metadata/csv/rdkit.csv')
             # Read RDKit descriptors
-            descriptors = pd.read_csv('csv/rdkit.csv.gz', compression='gzip')
+            descriptors = pd.read_csv('.metadata/csv/rdkit.csv.gz', compression='gzip')
             self.calc = 'rdkit' # control variable
         else:
             file = st.file_uploader('or Upload descriptors file')
@@ -172,8 +179,8 @@ calculated with an external program of your preference.
 
         descriptors_list = descriptors.columns.tolist()[1:]
         selected = st.multiselect(label="Select descriptors", options=(
-            [f'Select all ({len(descriptors_list)})'] + descriptors_list))
-        if 'Select all' in selected:
+            ['Select all ({})'.format(len(descriptors_list))] + descriptors_list))
+        if 'Select all ({})'.format(len(descriptors_list)) in selected:
             selected = descriptors_list
         st.write("You selected", len(selected), "features")
 
@@ -245,7 +252,7 @@ unsafe_allow_html=True)
         st.markdown(f'''
         |Compounds|Active|Inactive|
         |---|---|---|
-        |{len(self.data)}|{len(actives)}|{len(inactives)}|
+        |{len(actives) + len(inactives)}|{len(actives)}|{len(inactives)}|
         ''')
 
         st.text('')
@@ -255,7 +262,7 @@ unsafe_allow_html=True)
 
         if st.checkbox('Show filtered compounds'):
             st.subheader('Filtered compounds')
-            st.write(df_filtered)
+            st.write(df_filtered.reset_index())
 
         if not st.checkbox('Hide graph'):
             fig, ax = pyplot.subplots(figsize=(15,5))
@@ -267,8 +274,8 @@ unsafe_allow_html=True)
         merged_data = pd.merge(self.data[['CID', self.activity_label, 'activity']].dropna(), 
                             self.descriptors, on=['CID'])
         # Write Merged Dataset
-        if not os.path.isfile('csv/merged.csv'):
-            merged_data.to_csv('csv/merged.csv', index=False)
+        if not os.path.isfile('.metadata/csv/merged.csv'):
+            merged_data.to_csv('.metadata/csv/merged.csv', index=False)
 
         return merged_data
 
@@ -405,7 +412,7 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
 
         features = list(self.descriptors.columns[1:])
         # Save input features names
-        with open('features.lst', 'w+') as features_file:
+        with open('.metadata/features.lst', 'w+') as features_file:
             features_file.write("\n".join(features))
     
     def train_test_proba(self, model_name):
@@ -419,7 +426,7 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
             st.error(str(e))
             st.stop()
 
-        with open('features.lst', 'r') as file:
+        with open('.metadata/features.lst', 'r') as file:
             features = file.read().splitlines()
         if features != list(self.descriptors.columns[1:]):
             st.error(f'Expected features do not match the given features. Please build the Pipeline again.')
@@ -434,7 +441,7 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
 
         self.train_proba = self.pipeline.predict_proba(self.X_train)[:,1]
         fpr, tpr, _ = roc_curve(self.y_train, self.train_proba)
-        ax.plot(fpr, tpr, label=f'Train set: {auc(fpr, tpr):>.3f}')
+        ax.plot(fpr, tpr, label=f'Training set: {auc(fpr, tpr):>.3f}')
 
         pyplot.xlabel('False Positive Rate')
         pyplot.ylabel('True Positive Rate')
@@ -458,17 +465,17 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
             st.write(self.new_data.head())
         file.close()
         
-        self.write_smiles(self.new_data, 'smiles2.smi')
+        self.write_smiles(self.new_data, '.metadata/smiles2.smi')
         if self.calc == 'mordred':
-            self.write_mordred_descriptors('smiles2.smi', 'csv/mordred2.csv')
+            self.write_mordred_descriptors('.metadata/smiles2.smi', '.metadata/csv/mordred2.csv')
             # Read MORDRED descriptors
-            descriptors = pd.read_csv('csv/mordred2.csv.gz', compression='gzip')
+            descriptors = pd.read_csv('.metadata/csv/mordred2.csv.gz', compression='gzip')
             descriptors.rename(columns={'name':'CID'}, inplace=True)
             self.new_data = pd.merge(self.new_data, descriptors[self.descriptors.columns], on=['CID'])
         elif self.calc == 'rdkit':
-            self.write_rdkit_descriptors('smiles2.smi', 'csv/rdkit2.csv')
+            self.write_rdkit_descriptors('.metadata/smiles2.smi', '.metadata/csv/rdkit2.csv')
             # Read RDKit descriptors
-            descriptors = pd.read_csv('csv/rdkit2.csv.gz', compression='gzip')
+            descriptors = pd.read_csv('.metadata/csv/rdkit2.csv.gz', compression='gzip')
             self.new_data = pd.merge(self.new_data, descriptors[self.descriptors.columns], on=['CID'])
         else:
             file = st.file_uploader('Upload the descriptors file for the new compounds')
@@ -514,8 +521,8 @@ Please make sure that the input file contains the same descriptors used for trai
         st.write('Top compounds:')
         st.write(predictions.head())
 
-        predictions.to_csv('csv/predictions.csv', index=False)
-        st.write('Compounds saved to "csv/predictions.csv".')
+        predictions.to_csv('predictions.csv', index=False)
+        st.write('Compounds saved to "predictions.csv".')
 
     @staticmethod
     def copyright_note():
