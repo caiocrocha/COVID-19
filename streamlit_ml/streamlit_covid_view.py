@@ -1,3 +1,11 @@
+# Corrigir numero de compostos/ ativos + inativos
+# Corrigir indice do dataframe filtered (reset_index)
+# Select all deu erro
+# Mostrar distribuicao dos dados para descritores (n < 10)
+# Curva ROC: mudar train para training
+# Build pipeline: escolher classificador antes
+# Mostrar tabela de metricas (para os modelos progressivamente)
+
 # Usar postera inteiro como conjunto de treinamento (opcao, elimina teste)
 # Upload dados de treinamento, teste (generalizacao)
 
