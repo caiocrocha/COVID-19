@@ -141,9 +141,9 @@ calculated with an external program of your preference.
             descriptors_list = [a[0] for a in Chem.Descriptors.descList]
 
             calculator = MolecularDescriptorCalculator(descriptors_list)
-            lista = [calculator.CalcDescriptors(m) for m in mols]
+            calc_descriptors = [calculator.CalcDescriptors(m) for m in mols]
             
-            descriptors = pd.DataFrame(lista, columns=descriptors_list)
+            descriptors = pd.DataFrame(calc_descriptors, columns=descriptors_list)
             descriptors.insert(0, column='CID', value=self.data['CID'])
             descriptors.to_csv(f'{csv}.gz', index=False, compression='gzip')
 
