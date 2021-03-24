@@ -1,8 +1,5 @@
-# Corrigir numero de compostos/ ativos + inativos ok
-# Corrigir indice do dataframe filtered (reset_index) ok
 # Select all deu erro
 # Mostrar distribuicao dos dados para descritores (n < 10)
-# Curva ROC: mudar train para training ok
 # Build pipeline: escolher classificador antes
 # Mostrar tabela de metricas (para os modelos progressivamente)
 
@@ -46,14 +43,16 @@ class App():
         ########################
         st.markdown('## **Activity data**')
         st.markdown('### Visualizing properties')
-        self.data = self.download_activity(DATA_URL)
-        self.write_smiles(self.data, '.metadata/smiles.smi')
+        self.downloaded_data = self.download_activity(DATA_URL)
+        self.write_smiles(self.downloaded_data, '.metadata/smiles.smi')
 
         #######################
         # Summary of the data 
         #######################
+        self.data = self.downloaded_data.copy()
         self.activity_label = None
         self.show_properties() # show properties and set activity label
+        self.label_compounds() # drop activators and label the compounds according to their activity
 
         #######################
         # Load descriptors 
@@ -77,38 +76,40 @@ class App():
     # Functions
     @staticmethod
     def show_logo():
-        st.sidebar.image('Logo_medium.png')
+        st.sidebar.image('logo/Logo_medium.png')
 
     @staticmethod
     def show_description():
         st.markdown('''## **Welcome to**
 # SARS-CoV-2
 ## Machine Learning Drug Hunter
-A straightforward tool that combines experimental activity data, molecular descriptors and machine learning 
-for classifying potential drug candidates against SARS-CoV-2 Main Protease (MPro).     
-We use the **COVID Moonshot**, a public collaborative initiatiave by **PostEra**, as the dataset of compounds containing 
-the experimental activity data for the machine learning classifiers. The molecular descriptors can 
-be automatically calculated with Mordred or RDKit, or you can also provide a CSV file of molecular descriptors 
-calculated with an external program of your preference.     
-<sub>We'd like to send our deepest thanks to **PostEra**, without which this work wouldn't have been possible. </sub>
-''', unsafe_allow_html=True)
+A straightforward tool that combines experimental activity data, molecular descriptors and machine 
+learning for classifying potential drug candidates against the SARS-CoV-2 Main Protease (MPro).     
+
+We use the **COVID Moonshot**, a public collaborative initiatiave by **PostEra**, as the dataset of 
+compounds containing the experimental activity data for the machine learning classifiers. We'd like 
+to express our sincere thanks to PostEra, without which this work wouldn't have been possible.    
+
+The molecular descriptors can be automatically calculated with Mordred or RDKit, or you can also 
+provide a CSV file of molecular descriptors calculated with an external program of your preference.     
+
+This main window is going to guide you through the App, while the sidebar to the left offers you an extra 
+interactive experience with options that allow more control over the construction of the Pipeline. **Let's get started!**
+''')
 
     @staticmethod
     def create_metadata_dir():
         if not os.path.isdir('.metadata'):
             os.mkdir('.metadata')
     
+    @staticmethod
     @st.cache(suppress_st_warning=True, allow_output_mutation=True)
-    def download_activity(self, DATA_URL):
+    def download_activity(DATA_URL):
         # Verbose
-        st.text('Fetching data from PostEra... ')
+        st.text('Fetching the data from PostEra...')
         data_load_state = st.markdown('Loading activity data...')
-        if os.path.isfile('activity.csv'):
-            data = pd.read_csv('activity.csv')
-        else:
-            data = pd.read_csv(DATA_URL)
-            data.to_csv('activity.csv', index=False)
-        data_load_state.text('Done! (using cache)')
+        data = pd.read_csv(DATA_URL)
+        data.to_csv('activity.csv', index=False)
         st.text('Data saved to "activity.csv"')
         return data
     
@@ -120,7 +121,7 @@ calculated with an external program of your preference.
 
     @staticmethod
     @st.cache(suppress_st_warning=True)
-    def write_mordred_descriptors(smiles, csv) :
+    def write_mordred_descriptors(smiles, csv):
         # Run MORDRED with smiles file.
         # Could not make mordred work with rdkit.
         # There is a lot of (unsolved) confusion with library compatibility
@@ -182,7 +183,7 @@ calculated with an external program of your preference.
             ['Select all ({})'.format(len(descriptors_list))] + descriptors_list))
         if 'Select all ({})'.format(len(descriptors_list)) in selected:
             selected = descriptors_list
-        st.write("You selected", len(selected), "features")
+        st.write("You have selected", len(selected), "features")
 
         if not selected:
             st.stop()
@@ -192,9 +193,7 @@ calculated with an external program of your preference.
         
     def show_properties(self):
         # List numeric columns
-        numerics = ['int16', 'int32', 'int64', 'float16', 'float32', 'float64']
-        data_numeric = self.data.select_dtypes(include=numerics).columns.tolist()
-        #data_numeric=data_numeric.to_numeric()
+        data_numeric = self.data.select_dtypes(include=[int,float]).columns.tolist()
         if 'activity' in data_numeric:
             data_numeric.remove('activity')
 
@@ -203,12 +202,11 @@ calculated with an external program of your preference.
         ########################
 
         # Create a sidebar dropdown to select property to show.
-        activity_label = st.sidebar.selectbox(label="Properties *",
+        activity_label = st.sidebar.selectbox(label="Filter by: *",
                                         options=([None, *data_numeric]))
-        st.sidebar.markdown('''<sub>* The classifier will be trained accordingly to the selected property. 
-If no property is selected, then "f_inhibition_at_50_uM" will be used for labeling the compounds.    
-A compound will be considered to be active if `Property > 50`. This value can be adjusted with the slider below.</sub>''', 
-unsafe_allow_html=True)
+        st.sidebar.markdown('''\* _The classifier will be trained according to the selected property. 
+If no property is selected, then **f_inhibition_at_50_uM** will be used for labeling the compounds.    
+A compound will be considered active if the **`Selected Property > 50`**. This value can be adjusted with the slider below._''')
         
         if activity_label is None:
             activity_label = 'f_inhibition_at_50_uM'
@@ -239,35 +237,43 @@ unsafe_allow_html=True)
 
         ''')
 
-        # Put a label on it
+        st.text('')
+        if st.checkbox('Show downloaded data'):
+            st.dataframe(self.downloaded_data)
+
+    def label_compounds(self):
         threshold = st.sidebar.slider("Threshold for selecting active compounds:", 0, 100, value=50)
-        self.data['activity'] = 0
-        self.data.loc[self.data[activity_label] > threshold, 'activity'] = 1
 
-        # Create sublists
-        actives   = self.data.query(f'{activity_label} > {threshold}')
-        inactives = self.data.query(f'{activity_label} <= {threshold}')
-
-        st.text('')
-        st.markdown(f'''
-        |Compounds|Active|Inactive|
-        |---|---|---|
-        |{len(actives) + len(inactives)}|{len(actives)}|{len(inactives)}|
-        ''')
-
-        st.text('')
-        if st.checkbox('Show raw data'):
-            st.subheader('Raw data')
-            st.write(self.data)
-
-        if st.checkbox('Show filtered compounds'):
-            st.subheader('Filtered compounds')
-            st.write(df_filtered.reset_index())
+        # Plot the distribution of the data
+        dist = self.downloaded_data[['CID', self.activity_label]].copy()
+        dist['activity'] = 'inhibitor'
+        dist.loc[dist[self.activity_label] <= threshold, 'activity'] = 'inactive'
+        dist.loc[dist[self.activity_label] < 0, 'activity'] = 'activator'
 
         if not st.checkbox('Hide graph'):
             fig, ax = pyplot.subplots(figsize=(15,5))
-            sns.histplot(df_filtered[activity_label], kde=True, ax=ax)
+            sns.histplot(data=dist, x='f_inhibition_at_50_uM', hue='activity', ax=ax)
+            pyplot.ylabel('Number of compounds')
+            pyplot.title('Distribution of the data')
             st.pyplot(fig)
+        
+        self.data.dropna(subset=[self.activity_label], inplace=True)
+        self.data = self.data.query(f'{self.activity_label} > 0') # Drop activators (negative inhibition)
+
+        # Label the compounds
+        self.data['activity'] = 0
+        self.data.loc[self.data[self.activity_label] > threshold, 'activity'] = 1
+
+        st.write('Note: All **activators** have been removed from the dataset, and the **inhibitors** will be referred as **active** compounds.')
+        # Create sublists
+        actives    = self.data.query(f'{self.activity_label} > {threshold}')
+        inactives  = self.data.query(f'{self.activity_label} <= {threshold}')
+
+        st.markdown(f'''
+        |Compounds|Active|Inactive|
+        |---|---|---|
+        |{len(self.data)}|{len(actives)}|{len(inactives)}|
+        ''')
         
     def merge_dataset(self):
         # Merge the dataset to include activity data and descriptors.
@@ -279,89 +285,128 @@ unsafe_allow_html=True)
 
         return merged_data
 
-    def show_merged_data(self):
-        if st.checkbox('Show labeled compounds'):
-            st.subheader('Merged data')
-            st.write(self.merged_data.head())
+    def calculate_cross_corr(self):
+        X = self.merged_data.drop(['CID','activity'], axis=1).dropna(axis=1)
+        Y = self.merged_data[self.activity_label]
+        corr = X.corr()
+        st.write(corr.head(5))
 
-    def feature_cross_correlation(self):
-        # Insert user-controlled values from sliders into the feature vector.
-        # for feature in control_features:
-        #     features[feature] = st.sidebar.slider(feature, 0, 100, 50, 5)
-        st.markdown('# Feature selection')
-        st.markdown('''Filter the selected descriptors. \*    
-<sub> \* The steps bellow are applied sequentially.</sub>''', unsafe_allow_html=True)
+        if st.checkbox('Show entire DataFrame'):
+            if len(corr) <= 100:
+                st.write(corr)
+            else:
+                st.error("Sorry, large DataFrames can't be displayed!")
 
-        st.markdown('## Cross Correlation')
-        if st.checkbox('Compute cross correlation between features', True):
-            X = self.merged_data.drop(['CID','activity'], axis=1).dropna(axis=1)
-            Y = self.merged_data[self.activity_label]
-            corr = X.corr()
-            st.write(corr.head(5))
-
-            if st.checkbox('Show entire DataFrame'):
-                if len(corr) <= 100:
-                    st.write(corr)
-                else:
-                    st.error("Sorry, large DataFrames can't be displayed!")
-
-            if st.checkbox('Show correlation HeatMap'):
+        if st.checkbox('Show correlation HeatMap'):
+            if len(corr) <= 100:
                 fig, ax = pyplot.subplots(figsize=(10,10))
                 sns.heatmap(corr, annot=True, cmap='Reds', square=True, ax=ax)
                 st.pyplot(fig)
+            else:
+                st.error("Sorry, large DataFrames can't be displayed!")
 
-            # Consertar (remover entre elas, não somente correlacionado à atividade)
-            if st.checkbox('Remove highly correlated features (|Correlation| > Correlation Threshold)', True):
-                value = st.slider("Correlation Threshold", 0.0, 1.0, value=0.95)
+        if st.checkbox('Remove highly correlated features (|Correlation| > Correlation Threshold)', True):
+            value = st.slider('Correlation Threshold', 0.0, 1.0, value=0.95)
 
-                # https://chrisalbon.com/machine_learning/feature_selection/drop_highly_correlated_features/
-                # Create correlation matrix
-                corr_matrix = corr.drop([self.activity_label], axis=1).abs()
-                # Select upper triangle of correlation matrix
-                upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))
+            # https://chrisalbon.com/machine_learning/feature_selection/drop_highly_correlated_features/
+            # Create correlation matrix
+            corr_matrix = corr.drop([self.activity_label], axis=1).abs()
+            # Select upper triangle of correlation matrix
+            upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))
 
-                # Find features with correlation greater than "value"
-                to_drop = [column for column in upper.columns if any(upper[column] > value)]
+            # Find features with correlation greater than "value"
+            to_drop = [column for column in upper.columns if any(upper[column] > value)]
 
-                # Drop features 
-                st.write('Removed features: ')
-                st.write(to_drop)
-                self.descriptors.drop(to_drop, axis=1, inplace=True)
-                self.merged_data.drop(to_drop, axis=1, inplace=True)                
-
-        st.markdown('## Variance Thresholding')
-        # Create the sidebar slider for VarianceThreshold
-        value = st.slider("Variance Threshold", 0.0, 1.0, value=0.3)
-        if st.checkbox('Filter out features with variance bellow the threshold'):
-            from sklearn.feature_selection import VarianceThreshold
-
-            X = self.merged_data.drop(['CID','activity', self.activity_label], axis=1).dropna(axis=1)
-            Y = self.merged_data[self.activity_label]
-            var = VarianceThreshold(threshold=value)
-            var = var.fit(X, Y)
-
-            # Get features within the threshold
-            cols = var.get_support(indices=True)
-            features = X.columns[cols].tolist()
-
-            # Remove features NOT within the threshold
-            to_drop = X.columns[~X.columns.isin(features)].tolist()
+            # Drop features 
             st.write('Removed features: ')
             st.write(to_drop)
-            
             self.descriptors.drop(to_drop, axis=1, inplace=True)
-            self.merged_data.drop(to_drop, axis=1, inplace=True) 
+            self.merged_data.drop(to_drop, axis=1, inplace=True)
 
-        if st.checkbox('Show filtered data'):
-            st.write(self.merged_data.head())
+    def calculate_pca(self):
+        descriptors_list = self.descriptors.columns.tolist()[1:]
+        max_value = len(descriptors_list)
+        default = 0.9
+        n_components = st.number_input(f'Please enter the number of components to select [0, {max_value}]: ', 
+                        value=default, min_value=0.0, max_value=float(max_value))
+        st.markdown(f'''\* If the input number is less than 1, then it will correspond to the percentage of the explained 
+variance. E.g. the default value corresponds to an explained variance of {default * 100}%.''')
+        if n_components > 1:
+            n_components = int(n_components)
+
+        from sklearn.decomposition import PCA
+        from sklearn.preprocessing import StandardScaler
+
+        scaler = StandardScaler()
+        # Split training set into X and y
+        y = self.merged_data['activity']
+        X = self.merged_data[descriptors_list].copy()
+        # Apply StandardScaler on X
+        X_transformed = scaler.fit_transform(X)
+        X = pd.DataFrame(X_transformed, columns=X.columns.tolist())
+
+        state = st.text('Running PCA...')
+        # Fit and transform the training data
+        pca = PCA(n_components=n_components)
+        X_pca = pca.fit_transform(X)
+
+        state.text('PCA completed!')
+        variance_total = sum(pca.explained_variance_ratio_)
+        if pca.n_components_ < 51:
+            fig, ax = pyplot.subplots(figsize=(12,4))
+            sns.barplot(x=[i for i in range(1, pca.n_components_ + 1)], y=pca.explained_variance_ratio_, ax=ax)
+            ax.set(xlabel='Principal Component', ylabel='Explained variance ratio', 
+                                    title=f'Variance explained by {variance_total * 100:.1f}%')
+            st.pyplot(fig)
+        else:
+            st.write(f'Explained variance: {variance_total * 100:.1f}%')
+
+        # Reassign the data to the new transformed data
+        pca_data = pd.DataFrame(X_pca)
+        pca_features = [f'PCA_{i:02d}' for i in range(1, pca.n_components_ + 1)]
+        pca_data.columns = pca_features
+        pca_data['CID'] = self.merged_data['CID'].tolist()
+        pca_data['activity'] = y.tolist()
+        # Rearrange the columns
+        cols = pca_data.columns.tolist()
+        cols = cols[-2:] + cols[:-2]
+        pca_data = pca_data[cols]
+
+        self.merged_data = pca_data
+        self.descriptors = pca_data[['CID'] + pca_features]
+        st.write('### Extracted features')
+        st.write(self.descriptors.head())
+        st.write('These features are going to be the input data for the model.')
+
+    def feature_selection(self):
+        st.markdown('# Feature selection')
+        st.markdown('Filter the selected descriptors. The steps bellow are applied sequentially.')
+
+        st.markdown('## Cross Correlation')
+        if st.checkbox('Compute the cross correlation between the features'):
+            self.calculate_cross_corr()
+
+        st.markdown('## PCA')
+        if st.checkbox('Calculate PCA of the selected features'):
+            self.calculate_pca()
+        
+        if st.checkbox('Show histogram plots of the selected features'):
+            descriptors_list = self.descriptors.columns.tolist()[1:]
+            tmp = pd.melt(self.descriptors, id_vars=['CID'], value_vars=descriptors_list[:12])
+            g = sns.FacetGrid(data=tmp, col='variable', col_wrap=4, sharey=False, sharex=False)
+            g.map(sns.histplot, 'value')
+            if len(descriptors_list) > 11:
+                st.warning("""Unfortunately, we can't plot all selected descriptors    
+Showing the distribution plots of the top 12 features""")
+            st.pyplot(g)
             
     @staticmethod
     def select_model():
         model_list = ['RandomForestClassifier', 'XGBClassifier', 'KNeighborsClassifier']
         model_name = st.sidebar.selectbox(label="Classifier", options=(model_list))
 
-        st.sidebar.markdown('''<sub>Note: The hyperparaters showed bellow are the optimal parameters found in our study. 
-Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=True)
+        st.sidebar.markdown('''Note: The hyperparaters showed bellow are the optimal parameters found in our study. 
+Nevertheless, feel free to change them as you will.''')
         if model_name == 'RandomForestClassifier':
             from sklearn.ensemble import RandomForestClassifier
 
@@ -422,7 +467,7 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
             self.pipeline = pickle.load(file)
             file.close()
         except OSError as e:
-            st.error("Oops! It seems the model hasn't been trained yet")
+            st.error("Oops! It seems the model hasn't been trained yet. Error traceback: ")
             st.error(str(e))
             st.stop()
 
@@ -453,9 +498,9 @@ Nevertheless, feel free to change them as you will.</sub>''', unsafe_allow_html=
         st.markdown('## Classify new compounds')
         file = st.file_uploader('Upload file *')
         show_file = st.empty()
-        st.markdown('''<sub> \* File must contain the following columns:   
+        st.markdown('''\* File must contain the following columns:   
 1 - "SMILES": SMILES structures of the compounds     
-2 - "CID": compounds ID</sub>''', unsafe_allow_html=True)
+2 - "CID": compounds ID''')
 
         if not file:
             show_file.info("Please upload a file of type: .csv")
@@ -543,8 +588,7 @@ def main() :
 
     if app.descriptors is not None:
         app.merged_data = app.merge_dataset()
-        app.show_merged_data()
-        app.feature_cross_correlation()
+        app.feature_selection()
 
         st.write('# Machine learning')
         app.split_X_and_y()
