@@ -1,23 +1,5 @@
-# Select all deu erro
-# Mostrar distribuicao dos dados para descritores (n < 10)
-# Build pipeline: escolher classificador antes
-# Mostrar tabela de metricas (para os modelos progressivamente)
-
 # Usar postera inteiro como conjunto de treinamento (opcao, elimina teste)
 # Upload dados de treinamento, teste (generalizacao)
-
-# Colocar opcao de usar descritores otimos (se selecionado rdkit) de acordo com o classificador
-# Otimizar: calculo dos descritores para os novos dados (new_data)
-
-# Opcoes: baixar resultados e baixar modelo pickle
-# Colocar SelectKBest com escolha de K
-
-# Escrever requirements, adicionar mordred e rdkit
-
-#show labeled compounds ser mais claro
-#modelo foi lido do pickle
-#incluir depois da curva roc metricas de avalacao
-#explicar treinamento e teste
 
 import os
 import numpy as np
@@ -35,8 +17,8 @@ class App():
         # Show logo, title and description
         self.show_logo()
         self.show_description()
-        # Create .metadata directory
-        self.create_metadata_dir()
+        # Check .metadata directory
+        self.metadata_dir()
 
         ########################
         # Load Activity data 
@@ -58,12 +40,14 @@ class App():
         # Load descriptors 
         #######################
         self.calc = None
-        self.descriptors = self.calculate_descriptors()
-        self.merged_data = None
+        self.descriptors_cols = None
+        self.descriptors      = self.calculate_descriptors()
+        self.merged_data      = None
         
         #######################
         # ML 
         #######################
+        self.pca = None
         self.new_data = None
         self.pipeline = None
         self.X_train  = None
@@ -83,7 +67,7 @@ class App():
         st.markdown('''## **Welcome to**
 # SARS-CoV-2
 ## Machine Learning Drug Hunter
-A straightforward tool that combines experimental activity data, molecular descriptors and machine 
+A straightforward App that combines experimental activity data, molecular descriptors and machine 
 learning for classifying potential drug candidates against the SARS-CoV-2 Main Protease (MPro).     
 
 We use the **COVID Moonshot**, a public collaborative initiatiave by **PostEra**, as the dataset of 
@@ -98,19 +82,47 @@ interactive experience with options that allow more control over the constructio
 ''')
 
     @staticmethod
-    def create_metadata_dir():
+    def metadata_dir():
+        if st.sidebar.checkbox('Clear ".metadata" directory'):
+            st.sidebar.warning('''You are about to erase all the contents of **.metadata**. This will remove 
+            any saved files, so this action is only recomended if you encountered an error. Are you 
+            sure you want to proceed?''')
+            st.sidebar.write('_If do not want to delete the contents of **.metadata**, just unselect the checkbox above._')
+            if st.sidebar.button('Yes, I want to delete the contents of the ".metadata" folder'):
+                if os.path.isdir('.metadata'):
+                    try:
+                        import shutil
+                        shutil.rmtree('.metadata')
+                        st.caching.clear_cache()
+                        st.sidebar.success('Directory successfully cleared!')
+                    except OSError as e:
+                        st.error('Could not remove folder. Error traceback: ')
+                        st.error(str(e))
+            
         if not os.path.isdir('.metadata'):
-            os.mkdir('.metadata')
+            try:
+                os.mkdir('.metadata')
+            except OSError as e:
+                st.error('Could not create **.metadata** directory. Error traceback: ')
+                st.error(str(e))
+                st.stop()
     
     @staticmethod
     @st.cache(suppress_st_warning=True, allow_output_mutation=True)
     def download_activity(DATA_URL):
         # Verbose
         st.text('Fetching the data from PostEra...')
-        data_load_state = st.markdown('Loading activity data...')
+        st.markdown('Loading activity data...')
         data = pd.read_csv(DATA_URL)
-        data.to_csv('activity.csv', index=False)
-        st.text('Data saved to "activity.csv"')
+        if not os.path.isdir('.metadata/csv'):
+            try:
+                os.mkdir('.metadata/csv')
+            except OSError as e:
+                st.error('Could not create ".metadata/csv". Error traceback: ')
+                st.error(str(e))
+
+        data.to_csv('.metadata/csv/activity.csv', index=False)
+        st.text('Data saved to ".metadata/csv/activity.csv"')
         return data
     
     @staticmethod
@@ -120,7 +132,6 @@ interactive experience with options that allow more control over the constructio
         data[['SMILES','CID']].to_csv(smiles, sep='\t', header=None, index=False)
 
     @staticmethod
-    @st.cache(suppress_st_warning=True)
     def write_mordred_descriptors(smiles, csv):
         # Run MORDRED with smiles file.
         # Could not make mordred work with rdkit.
@@ -132,11 +143,11 @@ interactive experience with options that allow more control over the constructio
         if os.path.isfile(csv):
             os.system(f'gzip {csv}')
     
-    @st.cache(suppress_st_warning=True)
-    def write_rdkit_descriptors(self, smiles, csv):
+    @staticmethod
+    def write_rdkit_descriptors(smiles, csv, data):
         if os.path.isfile(smiles) and not os.path.isfile(f'{csv}.gz'):
             # Get molecules from SMILES
-            mols = [Chem.MolFromSmiles(i) for i in self.data['SMILES']]
+            mols = [Chem.MolFromSmiles(i) for i in data['SMILES']]
 
             # Get list of descriptors
             descriptors_list = [a[0] for a in Chem.Descriptors.descList]
@@ -145,7 +156,7 @@ interactive experience with options that allow more control over the constructio
             calc_descriptors = [calculator.CalcDescriptors(m) for m in mols]
             
             descriptors = pd.DataFrame(calc_descriptors, columns=descriptors_list)
-            descriptors.insert(0, column='CID', value=self.data['CID'])
+            descriptors.insert(0, column='CID', value=data['CID'].tolist())
             descriptors.to_csv(f'{csv}.gz', index=False, compression='gzip')
 
     def calculate_descriptors(self):
@@ -157,7 +168,7 @@ interactive experience with options that allow more control over the constructio
             descriptors.rename(columns={'name':'CID'}, inplace=True)
             self.calc = 'mordred' # control variable
         elif st.checkbox('Calculate RDKit descriptors'):
-            self.write_rdkit_descriptors('.metadata/smiles.smi', '.metadata/csv/rdkit.csv')
+            self.write_rdkit_descriptors('.metadata/smiles.smi', '.metadata/csv/rdkit.csv', self.data)
             # Read RDKit descriptors
             descriptors = pd.read_csv('.metadata/csv/rdkit.csv.gz', compression='gzip')
             self.calc = 'rdkit' # control variable
@@ -178,11 +189,11 @@ interactive experience with options that allow more control over the constructio
         
         st.dataframe(descriptors.head())
 
-        descriptors_list = descriptors.columns.tolist()[1:]
+        self.descriptors_cols = descriptors.columns.tolist()[1:]
         selected = st.multiselect(label="Select descriptors", options=(
-            ['Select all ({})'.format(len(descriptors_list))] + descriptors_list))
-        if 'Select all ({})'.format(len(descriptors_list)) in selected:
-            selected = descriptors_list
+            ['Select all ({})'.format(len(self.descriptors_cols))] + self.descriptors_cols))
+        if 'Select all ({})'.format(len(self.descriptors_cols)) in selected:
+            selected = self.descriptors_cols
         st.write("You have selected", len(selected), "features")
 
         if not selected:
@@ -201,6 +212,7 @@ interactive experience with options that allow more control over the constructio
         # Explore data
         ########################
 
+        st.sidebar.header('Activity data')
         # Create a sidebar dropdown to select property to show.
         activity_label = st.sidebar.selectbox(label="Filter by: *",
                                         options=([None, *data_numeric]))
@@ -324,8 +336,7 @@ A compound will be considered active if the **`Selected Property > 50`**. This v
             self.merged_data.drop(to_drop, axis=1, inplace=True)
 
     def calculate_pca(self):
-        descriptors_list = self.descriptors.columns.tolist()[1:]
-        max_value = len(descriptors_list)
+        max_value = len(self.descriptors_cols)
         default = 0.9
         n_components = st.number_input(f'Please enter the number of components to select [0, {max_value}]: ', 
                         value=default, min_value=0.0, max_value=float(max_value))
@@ -336,25 +347,24 @@ variance. E.g. the default value corresponds to an explained variance of {defaul
 
         from sklearn.decomposition import PCA
         from sklearn.preprocessing import StandardScaler
+        from imblearn.pipeline import make_pipeline
 
-        scaler = StandardScaler()
         # Split training set into X and y
         y = self.merged_data['activity']
-        X = self.merged_data[descriptors_list].copy()
-        # Apply StandardScaler on X
-        X_transformed = scaler.fit_transform(X)
-        X = pd.DataFrame(X_transformed, columns=X.columns.tolist())
+        X = self.merged_data[self.descriptors_cols].copy()
+
+        pca = make_pipeline(StandardScaler(), PCA(n_components=n_components))
 
         state = st.text('Running PCA...')
         # Fit and transform the training data
-        pca = PCA(n_components=n_components)
         X_pca = pca.fit_transform(X)
+        self.pca = pca
 
         state.text('PCA completed!')
-        variance_total = sum(pca.explained_variance_ratio_)
-        if pca.n_components_ < 51:
+        variance_total = sum(pca['pca'].explained_variance_ratio_)
+        if pca['pca'].n_components_ < 51:
             fig, ax = pyplot.subplots(figsize=(12,4))
-            sns.barplot(x=[i for i in range(1, pca.n_components_ + 1)], y=pca.explained_variance_ratio_, ax=ax)
+            sns.barplot(x=[i for i in range(1, pca['pca'].n_components_ + 1)], y=pca['pca'].explained_variance_ratio_, ax=ax)
             ax.set(xlabel='Principal Component', ylabel='Explained variance ratio', 
                                     title=f'Variance explained by {variance_total * 100:.1f}%')
             st.pyplot(fig)
@@ -363,7 +373,7 @@ variance. E.g. the default value corresponds to an explained variance of {defaul
 
         # Reassign the data to the new transformed data
         pca_data = pd.DataFrame(X_pca)
-        pca_features = [f'PCA_{i:02d}' for i in range(1, pca.n_components_ + 1)]
+        pca_features = [f'PCA_{i:02d}' for i in range(1, pca['pca'].n_components_ + 1)]
         pca_data.columns = pca_features
         pca_data['CID'] = self.merged_data['CID'].tolist()
         pca_data['activity'] = y.tolist()
@@ -374,9 +384,9 @@ variance. E.g. the default value corresponds to an explained variance of {defaul
 
         self.merged_data = pca_data
         self.descriptors = pca_data[['CID'] + pca_features]
-        st.write('### Extracted features')
+
+        st.write('### Principal Components')
         st.write(self.descriptors.head())
-        st.write('These features are going to be the input data for the model.')
 
     def feature_selection(self):
         st.markdown('# Feature selection')
@@ -390,6 +400,9 @@ variance. E.g. the default value corresponds to an explained variance of {defaul
         if st.checkbox('Calculate PCA of the selected features'):
             self.calculate_pca()
         
+        st.write('## Model input features')
+        st.write(self.descriptors.columns.tolist()[1:])
+
         if st.checkbox('Show histogram plots of the selected features'):
             descriptors_list = self.descriptors.columns.tolist()[1:]
             tmp = pd.melt(self.descriptors, id_vars=['CID'], value_vars=descriptors_list[:12])
@@ -402,16 +415,21 @@ Showing the distribution plots of the top 12 features""")
             
     @staticmethod
     def select_model():
-        model_list = ['RandomForestClassifier', 'XGBClassifier', 'KNeighborsClassifier']
-        model_name = st.sidebar.selectbox(label="Classifier", options=(model_list))
+        model_list = ['RandomForestClassifier', 'XGBClassifier', 'LogisticRegression', 'LinearSVC']
+        model_name = st.selectbox(label="Classifier", options=model_list)
+        st.markdown('''_The default hyperparameters are the optimal parameters found in our study, but feel free 
+to change them whenever you want in the sidebar beside.
+The constructed model is a **Pipeline** of _**`ColumnTransformer + SMOTE`**_, which automatically transforms the input data to the classifier._''')
 
-        st.sidebar.markdown('''Note: The hyperparaters showed bellow are the optimal parameters found in our study. 
-Nevertheless, feel free to change them as you will.''')
+        st.sidebar.header('Classifier')
+        st.sidebar.subheader(model_name)
+        #st.sidebar.markdown('''Note: The hyperparaters showed bellow are the optimal parameters found in our study. 
+#Nevertheless, feel free to change them as you will.''')
         if model_name == 'RandomForestClassifier':
             from sklearn.ensemble import RandomForestClassifier
 
-            n_estimators = st.sidebar.slider("Number of Estimators", 0, 1000, value=1000)
-            max_depth = st.sidebar.slider("Maximum depth per Tree", 0, 10, value=8)
+            n_estimators = st.sidebar.slider("Number of Estimators", 0, 1000, value=500)
+            max_depth = st.sidebar.slider("Maximum depth per Tree", 0, 10, value=6)
             return (model_name, RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, random_state=13))
 
         elif model_name == 'XGBClassifier':
@@ -423,11 +441,22 @@ Nevertheless, feel free to change them as you will.''')
             return (model_name, XGBClassifier(objective='reg:logistic', n_estimators=n_estimators, 
                 max_depth=max_depth, eta=eta, random_state=13))
 
-        else:
-            from sklearn.neighbors import KNeighborsClassifier
+        elif model_name == 'LogisticRegression':
+            from sklearn.linear_model import LogisticRegression
+            solver = st.sidebar.selectbox(label="Solver", options=['liblinear', 'newton-cg', 'lbfgs', 'sag', 'saga'])
+            max_iter = st.sidebar.slider("Maximum number of iterations", 100, 6000, step=100, value=100)
+            return (model_name, LogisticRegression(solver=solver, 
+                                                    max_iter=max_iter, random_state=13))
 
-            n_neighbors = st.sidebar.slider("Number of Neighbors", 0, 10, value=5)
-            return (model_name, KNeighborsClassifier(n_neighbors=n_neighbors))
+        elif model_name == 'LinearSVC':
+            from sklearn.svm import LinearSVC
+            from sklearn.calibration import CalibratedClassifierCV
+            # CalibratedClassifierCV applies probability transformation 
+            # on top of the SVC outputs, so we can plot its ROC curve
+            # https://stackoverflow.com/a/39712590/13131079
+            max_iter = st.sidebar.slider("Maximum number of iterations", 100, 6000, step=100, value=100)
+            return (model_name, CalibratedClassifierCV(
+                base_estimator=LinearSVC(dual=False, max_iter=max_iter, random_state=13)))
 
     def split_X_and_y(self):
         from sklearn.model_selection import train_test_split
@@ -438,12 +467,19 @@ Nevertheless, feel free to change them as you will.''')
 
     @st.cache(suppress_st_warning=True)
     def mlpipeline(self, model_name, model):
+        from sklearn.compose import ColumnTransformer
         from sklearn.preprocessing import StandardScaler
+        from sklearn.preprocessing import OneHotEncoder
         from imblearn.over_sampling import SMOTE
         from imblearn.pipeline import Pipeline
         
+        transformer = ColumnTransformer(transformers=[
+            ('continuous', StandardScaler(), self.X_train.select_dtypes(include=float).columns.tolist()), 
+            ('discrete', OneHotEncoder(handle_unknown='ignore'), self.X_train.select_dtypes(include=int).columns.tolist())
+        ])
+
         self.pipeline = Pipeline(steps=[('smote', SMOTE(random_state=42)), 
-                                        ('scaler', StandardScaler()), 
+                                        ('transformer', transformer), 
                                         ('clf', model)
                                         ])
         self.pipeline.fit(self.X_train, self.y_train)
@@ -460,39 +496,70 @@ Nevertheless, feel free to change them as you will.''')
         with open('.metadata/features.lst', 'w+') as features_file:
             features_file.write("\n".join(features))
     
-    def train_test_proba(self, model_name):
+    def train_test_scores(self, model_name):
         import pickle
         try:
             file = open(f'pickle/{model_name}.pickle', 'rb')
             self.pipeline = pickle.load(file)
             file.close()
         except OSError as e:
-            st.error("Oops! It seems the model hasn't been trained yet. Error traceback: ")
+            st.error(f"Oops! It seems the model hasn't been trained yet. Error traceback: ")
             st.error(str(e))
             st.stop()
 
-        with open('.metadata/features.lst', 'r') as file:
-            features = file.read().splitlines()
-        if features != list(self.descriptors.columns[1:]):
-            st.error(f'Expected features do not match the given features. Please build the Pipeline again.')
-            st.stop()
-        
         from sklearn.metrics import roc_curve, auc
         fig, ax = pyplot.subplots()
 
-        self.test_proba = self.pipeline.predict_proba(self.X_test)[:,1]
-        fpr, tpr, _ = roc_curve(self.y_test, self.test_proba)
-        ax.plot(fpr, tpr, label=f'Test set: {auc(fpr, tpr):>.3f}')
+        try:
+            self.test_proba = self.pipeline.predict_proba(self.X_test)[:,1]
+            self.train_proba = self.pipeline.predict_proba(self.X_train)[:,1]
+        except ValueError as e:
+            st.error('Expected features do not match the given features. Please train the model again. Error traceback: ')
+            st.error(str(e))
+            st.stop()
 
-        self.train_proba = self.pipeline.predict_proba(self.X_train)[:,1]
+        fpr, tpr, _ = roc_curve(self.y_test, self.test_proba)
+        auc_test = auc(fpr, tpr)
+        ax.plot(fpr, tpr, label=f'Test set: {auc_test:>.2f}')
+
         fpr, tpr, _ = roc_curve(self.y_train, self.train_proba)
-        ax.plot(fpr, tpr, label=f'Training set: {auc(fpr, tpr):>.3f}')
+        auc_train = auc(fpr, tpr)
+        ax.plot(fpr, tpr, label=f'Training set: {auc_train:>.2f}')
 
         pyplot.xlabel('False Positive Rate')
         pyplot.ylabel('True Positive Rate')
-        pyplot.title('Receiver Operating Characteristic')
+        pyplot.title(model_name)
         pyplot.legend()
+
+        if not os.path.isdir('.metadata/roc'):
+            os.makedirs('.metadata/roc')
+        pyplot.savefig(f'.metadata/roc/{model_name}.png', dpi=200)
+        st.markdown('### Receiver Operating Characteristic')
         st.pyplot(fig)
+
+        if st.checkbox('Show ROC of the previous models'):
+            _, _, filenames = next(os.walk('.metadata/roc'))
+            filenames.remove(f'{model_name}.png')
+            for clf in filenames:
+                st.image(f'.metadata/roc/{clf}')
+            
+        from sklearn.metrics import f1_score
+        from imblearn.metrics import geometric_mean_score
+        
+        y_pred = self.pipeline.predict(self.X_test)
+        y_pred_train = self.pipeline.predict(self.X_train)
+        scores = [model_name, f1_score(self.y_test, y_pred), geometric_mean_score(self.y_test, y_pred), auc_test, 
+            f1_score(self.y_train, y_pred_train), geometric_mean_score(self.y_train, y_pred_train), auc_train]
+        
+        scores_data = pd.DataFrame([scores], columns=['Classifier','test_f1','test_geometric_mean','test_roc_auc', 
+                'train_f1','train_geometric_mean','train_roc_auc'])
+        if os.path.isfile('.metadata/scores.csv'):
+            scores_data = pd.concat([scores_data, pd.read_csv('.metadata/scores.csv')])
+            scores_data.drop_duplicates(subset=['Classifier'], inplace=True, keep='last')
+            
+        scores_data.to_csv('.metadata/scores.csv', index=False)
+        st.write('### Scoring metrics')
+        st.write(scores_data)
     
     def upload_new_compounds(self):
         st.markdown('## Classify new compounds')
@@ -516,12 +583,10 @@ Nevertheless, feel free to change them as you will.''')
             # Read MORDRED descriptors
             descriptors = pd.read_csv('.metadata/csv/mordred2.csv.gz', compression='gzip')
             descriptors.rename(columns={'name':'CID'}, inplace=True)
-            self.new_data = pd.merge(self.new_data, descriptors[self.descriptors.columns], on=['CID'])
         elif self.calc == 'rdkit':
-            self.write_rdkit_descriptors('.metadata/smiles2.smi', '.metadata/csv/rdkit2.csv')
+            self.write_rdkit_descriptors('.metadata/smiles2.smi', '.metadata/csv/rdkit2.csv', self.new_data)
             # Read RDKit descriptors
             descriptors = pd.read_csv('.metadata/csv/rdkit2.csv.gz', compression='gzip')
-            self.new_data = pd.merge(self.new_data, descriptors[self.descriptors.columns], on=['CID'])
         else:
             file = st.file_uploader('Upload the descriptors file for the new compounds')
             show_file = st.empty()
@@ -536,38 +601,57 @@ Nevertheless, feel free to change them as you will.''')
                     st.stop()
             file.close()
             try:
-                self.new_data = pd.merge(self.new_data, descriptors[self.descriptors.columns], on=['CID'])
+                tmp = pd.merge(self.new_data, descriptors[['CID'] + self.descriptors_cols], on=['CID'])
             except KeyError as e:
                 st.error('''Expected features do not match the given features. 
 Please make sure that the input file contains the same descriptors used for training the model.''')
                 st.stop()
+        
+        descriptors.dropna(subset=self.descriptors_cols, inplace=True)
+        
+        if self.pca is not None:
+            X = descriptors[self.descriptors_cols]
+            X_new = self.pca.transform(X)
+            # Reassign the data to the new transformed data
+            pca_data = pd.DataFrame(X_new)
+            pca_features = [f'PCA_{i:02d}' for i in range(1, self.pca['pca'].n_components_ + 1)]
+            pca_data.columns = pca_features
+            pca_data['CID'] = descriptors['CID'].tolist()
+            # Rearrange the columns
+            cols = pca_data.columns.tolist()
+            cols = cols[-1:] + cols[:-1]
+            pca_data = pca_data[cols]
+            self.new_data = pca_data
+        else:
+            self.new_data = pd.merge(self.new_data, descriptors[['CID'] + self.descriptors_cols], on=['CID'])
             
     def pipeline_predict(self):
         st.markdown('### **Predictions**')
-        descriptors_list = self.descriptors.columns[1:].tolist()
-        X_val = self.new_data[descriptors_list]
-        st.write('Model input features: ')
-        st.write(descriptors_list)
+        features = self.descriptors.columns[1:].tolist()
+        X_val = self.new_data[features]
 
-        y_pred  = self.pipeline.predict(X_val)
+        y_pred  = pd.Series(self.pipeline.predict(X_val))
         y_proba = self.pipeline.predict_proba(X_val)[:,1]
 
-
-
-
-        # Active ou inactive no lugar de 0 ou 1
-        # Mostrar numero de ativos ou inativos
-
         predictions = self.new_data[['CID']].copy()
-        predictions['prediction'] = y_pred
+        predictions['prediction'] = y_pred.replace({1: 'active', 0: 'inactive'}).tolist()
         predictions['probability'] = y_proba
         predictions.sort_values('probability', ascending=False, inplace=True)
 
+        counts = predictions['prediction'].value_counts()
+
+        st.markdown(f'''
+        |Compounds|Active|Inactive|
+        |---|---|---|
+        |{len(predictions)}|{counts['active']}|{counts['inactive']}|
+        ''')
+
+        st.write('')
         st.write('Top compounds:')
-        st.write(predictions.head())
+        st.write(predictions.reset_index(drop=True).head())
 
         predictions.to_csv('predictions.csv', index=False)
-        st.write('Compounds saved to "predictions.csv".')
+        st.write('Predictions saved to "predictions.csv".')
 
     @staticmethod
     def copyright_note():
@@ -576,9 +660,7 @@ Please make sure that the input file contains the same descriptors used for trai
         st.markdown('Definir/atualizar copyright quando estiver pronto')
 
 
-
-
-def main() :
+def main():
     # """Run this function to display the Streamlit app"""
     # st.info(__doc__)
 
@@ -593,15 +675,14 @@ def main() :
         st.write('# Machine learning')
         app.split_X_and_y()
         model_name, model = app.select_model()
-        if st.checkbox('Build Pipeline'):
+        if st.checkbox('Train model'):
             app.mlpipeline(model_name, model)
+            st.markdown(f'_Model saved to pickle/{model_name}.pickle_')
         
-        app.train_test_proba(model_name)
+        app.train_test_scores(model_name)
         app.upload_new_compounds()
         app.pipeline_predict()
         
-    #mlpipeline2()
-
     # Copyright footnote
     app.copyright_note()
 
